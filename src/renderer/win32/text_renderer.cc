@@ -70,17 +70,17 @@ CRect ToCRect(const Rect &rect) {
 COLORREF GetTextColor(TextRenderer::FONT_TYPE type) {
   switch (type) {
     case TextRenderer::FONTSET_SHORTCUT:
-      return RGB(0x61, 0x61, 0x61);
+      return RGB(0xD0, 0xD0, 0xD0);  // 明るめのグレー
     case TextRenderer::FONTSET_CANDIDATE:
-      return RGB(0x00, 0x00, 0x00);
+      return RGB(0xE0, 0xE0, 0xE0);  // 白っぽい
     case TextRenderer::FONTSET_DESCRIPTION:
-      return RGB(0x88, 0x88, 0x88);
+      return RGB(0xC0, 0xC0, 0xC0);  // 明るめのグレー
     case TextRenderer::FONTSET_FOOTER_INDEX:
-      return RGB(0x4c, 0x4c, 0x4c);
+      return RGB(0xA0, 0xA0, 0xA0);  // 少し明るい
     case TextRenderer::FONTSET_FOOTER_LABEL:
-      return RGB(0x4c, 0x4c, 0x4c);
+      return RGB(0xA0, 0xA0, 0xA0);  // 少し明るい
     case TextRenderer::FONTSET_FOOTER_SUBLABEL:
-      return RGB(0xA7, 0xA7, 0xA7);
+      return RGB(0xB0, 0xB0, 0xB0);  // 明るめ
     default:
       break;
   }
@@ -108,7 +108,7 @@ COLORREF GetTextColor(TextRenderer::FONT_TYPE type) {
   }
 
   LOG(DFATAL) << "Unknown type: " << type;
-  return RGB(0, 0, 0);
+  return RGB(0xE0, 0xE0, 0xE0);  // ダークモードのデフォルトは明るい色
 }
 
 LOGFONT GetLogFont(TextRenderer::FONT_TYPE type) {
