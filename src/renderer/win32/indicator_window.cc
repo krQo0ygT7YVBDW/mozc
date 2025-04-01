@@ -254,26 +254,27 @@ class IndicatorWindow::WindowImpl
     LOGFONT logfont = GetMessageBoxLogFont();
     info.label_font = mozc::win32::WideToUtf8(logfont.lfFaceName);
 
-    info.frame_color = RGBColor(1, 122, 204);
-    info.blur_color = RGBColor(1, 122, 204);
+    info.frame_color = RGBColor(80, 160, 255);  // ダークモード用の青
+    info.blur_color = RGBColor(80, 160, 255);
     info.rect_width = ceil(dpi_scaling_ * 45.0);   // snap to pixel alignment
     info.rect_height = ceil(dpi_scaling_ * 45.0);  // snap to pixel alignment
     info.corner_radius = dpi_scaling_ * 0.0;
     info.tail_height = dpi_scaling_ * 5.0;
     info.tail_width = dpi_scaling_ * 10.0;
     info.blur_sigma = dpi_scaling_ * 3.0;
-    info.blur_alpha = 0.5;
+    info.blur_alpha = 0.7;  // 少し強調
     info.frame_thickness = dpi_scaling_ * 1.0;
     info.label_size = 13.0;  // no need to be scaled.
-    info.label_color = RGBColor(0, 0, 0);
+    info.label_color = RGBColor(32, 32, 32);  // ダークモードでは白にする
+		// info.inside_color = RGBColor(32, 32, 32);	// 背景色？
     info.blur_offset_x = 0;
     info.blur_offset_y = 0;
 
     switch (mode) {
       case commands::DIRECT:
         info.blur_sigma = dpi_scaling_ * 0.0;
-        info.frame_color = RGBColor(186, 186, 186);
-        info.label_color = RGBColor(0, 0, 0);
+        info.frame_color = RGBColor(120, 120, 120);  // 少し暗めのグレー
+        info.label_color = RGBColor(32, 32, 32);  // 白
         info.blur_sigma = dpi_scaling_ * 0.0;
         info.frame_thickness = dpi_scaling_ * 1.0;
         info.corner_radius = dpi_scaling_ * 0.0;
