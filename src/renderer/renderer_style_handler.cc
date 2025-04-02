@@ -171,9 +171,10 @@ void RendererStyleHandlerImpl::GetDefaultRendererStyle(RendererStyle *style) {
   infostyle->set_caption_padding(1);
   infostyle->mutable_caption_style()->set_font_size(12 * scale_factor_y);
   infostyle->mutable_caption_style()->set_left_padding(2 * scale_factor_x);
-  // infostyle->mutable_foreground_color()->set_r(0xC0);
-  // infostyle->mutable_foreground_color()->set_g(0xC0);
-  // infostyle->mutable_foreground_color()->set_b(0xC0);
+  infostyle->mutable_caption_foreground_color()->set_r(0xC0);//追加
+  infostyle->mutable_caption_foreground_color()->set_g(0xC0);
+  infostyle->mutable_caption_foreground_color()->set_b(0xC0);
+
   infostyle->mutable_caption_background_color()->set_r(0x38);
   infostyle->mutable_caption_background_color()->set_g(0x38);
   infostyle->mutable_caption_background_color()->set_b(0x38);
@@ -190,9 +191,10 @@ void RendererStyleHandlerImpl::GetDefaultRendererStyle(RendererStyle *style) {
   infostyle->mutable_border_color()->set_g(0x66);
   infostyle->mutable_border_color()->set_b(0x66);
 
-  // infostyle->mutable_focused_foreground_color()->set_r(0xC0);
-  // infostyle->mutable_focused_foreground_color()->set_g(0xC0);
-  // infostyle->mutable_focused_foreground_color()->set_b(0xC0);
+  infostyle->mutable_focused_foreground_color()->set_r(0xC0);//追加
+  infostyle->mutable_focused_foreground_color()->set_g(0xC0);
+  infostyle->mutable_focused_foreground_color()->set_b(0xC0);
+
   infostyle->mutable_focused_background_color()->set_r(0x9b);
   infostyle->mutable_focused_background_color()->set_g(0x9b);
   infostyle->mutable_focused_background_color()->set_b(0x9b);
