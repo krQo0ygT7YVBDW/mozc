@@ -264,9 +264,9 @@ class IndicatorWindow::WindowImpl
     info.blur_sigma = dpi_scaling_ * 3.0;
     info.blur_alpha = 0.7;  // 少し強調
     info.frame_thickness = dpi_scaling_ * 1.0;
-    info.label_size = 13.0;  // no need to be scaled.
-    info.label_color = RGBColor(32, 32, 32);  // ダークモードでは白にする
-		// info.inside_color = RGBColor(32, 32, 32);	// 背景色？
+    info.label_size = 14.0;  // no need to be scaled.
+    info.label_color = RGBColor(205, 205, 205);  // ダークモードでは白にする
+    info.inside_color = RGBColor(50, 50, 50);	// 背景色？
     info.blur_offset_x = 0;
     info.blur_offset_y = 0;
 
@@ -274,7 +274,7 @@ class IndicatorWindow::WindowImpl
       case commands::DIRECT:
         info.blur_sigma = dpi_scaling_ * 0.0;
         info.frame_color = RGBColor(120, 120, 120);  // 少し暗めのグレー
-        info.label_color = RGBColor(32, 32, 32);  // 白
+        // info.label_color = RGBColor(32, 32, 32);  // 白
         info.blur_sigma = dpi_scaling_ * 0.0;
         info.frame_thickness = dpi_scaling_ * 1.0;
         info.corner_radius = dpi_scaling_ * 0.0;
