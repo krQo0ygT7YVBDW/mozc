@@ -195,6 +195,10 @@ void RendererStyleHandlerImpl::GetDefaultRendererStyle(RendererStyle *style) {
   // infostyle->mutable_focused_foreground_color()->set_g(0xC0);
   // infostyle->mutable_focused_foreground_color()->set_b(0xC0);
 
+  infostyle->mutable_background_color()->set_r(0x8b);//追加
+  infostyle->mutable_background_color()->set_g(0x8b);
+  infostyle->mutable_background_color()->set_b(0x8b);
+ 
   infostyle->mutable_focused_background_color()->set_r(0x9b);
   infostyle->mutable_focused_background_color()->set_g(0x9b);
   infostyle->mutable_focused_background_color()->set_b(0x9b);
