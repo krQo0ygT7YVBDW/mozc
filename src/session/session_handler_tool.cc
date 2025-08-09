@@ -37,6 +37,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/base/no_destructor.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
@@ -59,7 +60,6 @@
 #include "config/config_handler.h"
 #include "engine/engine_factory.h"
 #include "engine/engine_interface.h"
-#include "prediction/user_history_predictor.h"
 #include "protocol/candidate_window.pb.h"
 #include "protocol/commands.pb.h"
 #include "protocol/config.pb.h"
@@ -86,9 +86,7 @@ using ::mozc::protobuf::TextFormat;
 using ::mozc::session::SessionHandlerTool;
 
 std::string ToTextFormat(const Message &proto) {
-  std::string str;
-  TextFormat::PrintToString(proto, &str);
-  return str;
+  return ::mozc::protobuf::Utf8Format(proto);
 }
 
 }  // namespace
@@ -329,14 +327,14 @@ void SessionHandlerInterpreter::ClearState() {
   // updated.
   CharacterFormManager::GetCharacterFormManager()->ReloadConfig(config);
 
+  CHECK(client_->ClearUserHistory());
+
   // Some destructors may save the state on storages. To clear the state, we
   // explicitly call destructors before clearing storages.
   FileUtil::UnlinkOrLogError(
       ConfigFileStream::GetFileName("user://boundary.db"));
   FileUtil::UnlinkOrLogError(
       ConfigFileStream::GetFileName("user://segment.db"));
-  FileUtil::UnlinkOrLogError(
-      prediction::UserHistoryPredictor::GetUserHistoryFileName());
 }
 
 void SessionHandlerInterpreter::ClearAll() {
@@ -381,7 +379,7 @@ const CandidateWord &SessionHandlerInterpreter::GetCandidateByValue(
     }
   }
 
-  static CandidateWord *fallback_candidate = new CandidateWord;
+  static absl::NoDestructor<CandidateWord> fallback_candidate;
   return *fallback_candidate;
 }
 

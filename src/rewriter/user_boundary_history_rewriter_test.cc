@@ -37,6 +37,7 @@
 #include "base/file_util.h"
 #include "base/system_util.h"
 #include "config/config_handler.h"
+#include "converter/candidate.h"
 #include "converter/segments.h"
 #include "protocol/config.pb.h"
 #include "request/conversion_request.h"
@@ -51,8 +52,8 @@ namespace {
 using ::testing::ElementsAre;
 
 // Creates a simple candidate whose key and value are set to `text`.
-Segment::Candidate MakeCandidate(absl::string_view text) {
-  Segment::Candidate cand;
+converter::Candidate MakeCandidate(absl::string_view text) {
+  converter::Candidate cand;
   cand.key = std::string(text);
   cand.content_key = cand.key;
   cand.value = cand.key;
@@ -126,7 +127,7 @@ TEST_F(UserBoundaryHistoryRewriterTest, SplitSegmentByHistory) {
     Segments segments = MakeSegments({"たん", "ぽぽ"}, Segment::FIXED_VALUE);
     // This field needs to be set to indicate that user resized this segments.
     segments.set_resized(true);
-    rewriter.Finish(convreq, &segments);
+    rewriter.Finish(convreq, segments);
   }
   {
     // Verify if ["たんぽぽ"] is split into ["たん", "ぽぽ"]. Since the actual
@@ -158,7 +159,7 @@ TEST_F(UserBoundaryHistoryRewriterTest, JoinSegmentsByHistory) {
     Segments segments = MakeSegments({"たんぽぽ"}, Segment::FIXED_VALUE);
     // This field needs to be set to indicate that user resized this segments.
     segments.set_resized(true);
-    rewriter.Finish(convreq, &segments);
+    rewriter.Finish(convreq, segments);
   }
   {
     // Verify if ["たん", "ぽぽ"] is joined to ["たんぽぽ"]. Since the actual
@@ -186,7 +187,7 @@ TEST_F(UserBoundaryHistoryRewriterTest, NoInsertWhenIncognito) {
     const ConversionRequest convreq = CreateConversionRequest();
     Segments segments = MakeSegments({"たん", "ぽぽ"}, Segment::FIXED_VALUE);
     segments.set_resized(true);
-    rewriter.Finish(convreq, &segments);
+    rewriter.Finish(convreq, segments);
   }
   {
     // Turn off the incognito mode. ResizeSegment() should not be called.
@@ -209,7 +210,7 @@ TEST_F(UserBoundaryHistoryRewriterTest, NoInsertWhenReadOnly) {
     const ConversionRequest convreq = CreateConversionRequest();
     Segments segments = MakeSegments({"たん", "ぽぽ"}, Segment::FIXED_VALUE);
     segments.set_resized(true);
-    rewriter.Finish(convreq, &segments);
+    rewriter.Finish(convreq, segments);
   }
   {
     // Enable learning again. ResizeSegment() should not be called.
@@ -236,7 +237,7 @@ TEST_F(UserBoundaryHistoryRewriterTest, NoInsertWhenDisableUserHistory) {
             .Build();
     Segments segments = MakeSegments({"たん", "ぽぽ"}, Segment::FIXED_VALUE);
     segments.set_resized(true);
-    rewriter.Finish(convreq, &segments);
+    rewriter.Finish(convreq, segments);
   }
   {
     // Enable learning again. ResizeSegment() should not be called.
@@ -262,7 +263,7 @@ TEST_F(UserBoundaryHistoryRewriterTest, NoInsertWhenNotResized) {
     // History should not be learned when sements is not resized.
     Segments segments = MakeSegments({"たん", "ぽぽ"}, Segment::FIXED_VALUE);
     segments.set_resized(false);  // Not resized!
-    rewriter.Finish(convreq, &segments);
+    rewriter.Finish(convreq, segments);
   }
   {
     // ResizeSegment() should not be called.
@@ -283,7 +284,7 @@ TEST_F(UserBoundaryHistoryRewriterTest, NoRewriteAfterClear) {
     // History IS learned.
     Segments segments = MakeSegments({"たん", "ぽぽ"}, Segment::FIXED_VALUE);
     segments.set_resized(true);
-    rewriter.Finish(convreq, &segments);
+    rewriter.Finish(convreq, segments);
   }
   {
     // ResizeSegment() should not be called after clearing the history.
@@ -305,7 +306,7 @@ TEST_F(UserBoundaryHistoryRewriterTest, NoRewriteWhenIncognito) {
     const ConversionRequest convreq = CreateConversionRequest();
     Segments segments = MakeSegments({"たん", "ぽぽ"}, Segment::FIXED_VALUE);
     segments.set_resized(true);
-    rewriter.Finish(convreq, &segments);
+    rewriter.Finish(convreq, segments);
   }
   {
     // ResizeSegment() should not be called in incognito mode even after the
@@ -329,7 +330,7 @@ TEST_F(UserBoundaryHistoryRewriterTest, NoRewriteWhenNoHistory) {
     const ConversionRequest convreq = CreateConversionRequest();
     Segments segments = MakeSegments({"たん", "ぽぽ"}, Segment::FIXED_VALUE);
     segments.set_resized(true);
-    rewriter.Finish(convreq, &segments);
+    rewriter.Finish(convreq, segments);
   }
   {
     // ResizeSegment() should not be called when history is disabled in config
@@ -357,7 +358,7 @@ TEST_F(UserBoundaryHistoryRewriterTest, NoRewriteWhenDisabledUserHistory) {
             .Build();
     Segments segments = MakeSegments({"たん", "ぽぽ"}, Segment::FIXED_VALUE);
     segments.set_resized(true);
-    rewriter.Finish(convreq, &segments);
+    rewriter.Finish(convreq, segments);
   }
   {
     // ResizeSegment() should not be called when history is disabled in request
@@ -384,7 +385,7 @@ TEST_F(UserBoundaryHistoryRewriterTest, NoRewriteWhenAlreadyResized) {
     const ConversionRequest convreq = CreateConversionRequest();
     Segments segments = MakeSegments({"たん", "ぽぽ"}, Segment::FIXED_VALUE);
     segments.set_resized(true);
-    rewriter.Finish(convreq, &segments);
+    rewriter.Finish(convreq, segments);
   }
   {
     // ResizeSegment() should not be called when the input segment is already
@@ -407,11 +408,11 @@ TEST_F(UserBoundaryHistoryRewriterTest, FailureOfSplitIsNotFatal) {
     const ConversionRequest convreq = CreateConversionRequest();
     Segments segments = MakeSegments({"たん", "ぽぽ"}, Segment::FIXED_VALUE);
     segments.set_resized(true);
-    rewriter.Finish(convreq, &segments);
+    rewriter.Finish(convreq, segments);
 
     segments = MakeSegments({"わた", "げ"}, Segment::FIXED_VALUE);
     segments.set_resized(true);
-    rewriter.Finish(convreq, &segments);
+    rewriter.Finish(convreq, segments);
   }
   {  // "たんぽぽ" is resized to ["たん", "ぽぽ"].
     const ConversionRequest convreq = CreateConversionRequest();

@@ -35,16 +35,13 @@
 #include <cstdint>
 #include <memory>
 #include <string>
-#include <tuple>
 #include <utility>
 #include <vector>
 
 #include "absl/base/no_destructor.h"
 #include "absl/container/btree_set.h"
-#include "absl/hash/hash.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
-#include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
@@ -58,10 +55,10 @@
 #include "base/vlog.h"
 #include "composer/composition.h"
 #include "composer/composition_input.h"
-#include "composer/mode_switching_handler.h"
-#include "composer/transliterators.h"
 #include "composer/key_event_util.h"
+#include "composer/mode_switching_handler.h"
 #include "composer/table.h"
+#include "composer/transliterators.h"
 #include "config/character_form_manager.h"
 #include "config/config_handler.h"
 #include "protocol/commands.pb.h"
@@ -228,7 +225,7 @@ constexpr auto kModifierRemovalMap =
 void RemoveExpandedCharsForModifier(absl::string_view asis,
                                     absl::string_view base,
                                     absl::btree_set<std::string> *expanded) {
-  if (!absl::StartsWith(asis, base)) {
+  if (!asis.starts_with(base)) {
     LOG(DFATAL) << "base is not a prefix of asis.";
     return;
   }
@@ -463,54 +460,12 @@ ComposerData::ComposerData(
     commands::Context::InputFieldType input_field_type, std::string source_text,
     std::vector<commands::SessionCommand::CompositionEvent>
         compositions_for_handwriting)
-    : composition_(composition),
+    : composition_(std::move(composition)),
       position_(position),
       input_mode_(input_mode),
       input_field_type_(input_field_type),
-      source_text_(source_text),
-      compositions_for_handwriting_(compositions_for_handwriting) {}
-
-ComposerData::ComposerData(const ComposerData &other)
-    : composition_(other.composition_),
-      position_(other.position_),
-      input_mode_(other.input_mode_),
-      input_field_type_(other.input_field_type_),
-      source_text_(other.source_text_),
-      compositions_for_handwriting_(other.compositions_for_handwriting_) {}
-
-ComposerData &ComposerData::operator=(const ComposerData &other) {
-  if (this != &other) {
-    composition_ = other.composition_;
-    position_ = other.position_;
-    input_mode_ = other.input_mode_;
-    input_field_type_ = other.input_field_type_;
-    source_text_ = other.source_text_;
-    compositions_for_handwriting_ = other.compositions_for_handwriting_;
-  }
-  return *this;
-}
-
-ComposerData::ComposerData(ComposerData &&other) noexcept
-    : composition_(std::move(other.composition_)),
-      position_(other.position_),
-      input_mode_(other.input_mode_),
-      input_field_type_(other.input_field_type_),
-      source_text_(std::move(other.source_text_)),
-      compositions_for_handwriting_(
-          std::move(other.compositions_for_handwriting_)) {}
-
-ComposerData &ComposerData::operator=(ComposerData &&other) noexcept {
-  if (this != &other) {
-    composition_ = std::move(other.composition_);
-    position_ = other.position_;
-    input_mode_ = other.input_mode_;
-    input_field_type_ = other.input_field_type_;
-    source_text_ = std::move(other.source_text_);
-    compositions_for_handwriting_ =
-        std::move(other.compositions_for_handwriting_);
-  }
-  return *this;
-}
+      source_text_(std::move(source_text)),
+      compositions_for_handwriting_(std::move(compositions_for_handwriting)) {}
 
 transliteration::TransliterationType ComposerData::GetInputMode() const {
   return input_mode_;
@@ -610,12 +565,10 @@ Composer::Composer(std::shared_ptr<const Table> table,
 }
 
 const ComposerData &Composer::EmptyComposerData() {
-  static const absl::NoDestructor<Composition> kComposition(
-      Table::GetSharedDefaultTable());
-  // Cannot use NoDestructor as it doesn't' accept > 6 params.
-  static const ComposerData *kComposerData =
-      new ComposerData(*kComposition, 0, transliteration::HIRAGANA,
-                       commands::Context::NORMAL, "", {});
+  static const absl::NoDestructor<ComposerData> kComposerData(
+      Composition(Table::GetSharedDefaultTable()), 0, transliteration::HIRAGANA,
+      commands::Context::NORMAL, "",
+      std::vector<commands::SessionCommand::CompositionEvent>());
   return *kComposerData;
 }
 

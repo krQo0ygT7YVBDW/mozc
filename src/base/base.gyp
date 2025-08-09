@@ -378,10 +378,12 @@
             '<(mozc_oss_src_dir)/data/preedit/12keys-halfwidthascii.tsv',
             '<(mozc_oss_src_dir)/data/preedit/12keys-hiragana.tsv',
             '<(mozc_oss_src_dir)/data/preedit/12keys-hiragana_intuitive.tsv',
+            '<(mozc_oss_src_dir)/data/preedit/50keys-hiragana.tsv',
             '<(mozc_oss_src_dir)/data/preedit/flick-halfwidthascii.tsv',
             '<(mozc_oss_src_dir)/data/preedit/flick-halfwidthascii_ios.tsv',
             '<(mozc_oss_src_dir)/data/preedit/flick-hiragana.tsv',
             '<(mozc_oss_src_dir)/data/preedit/flick-hiragana_intuitive.tsv',
+            '<(mozc_oss_src_dir)/data/preedit/flick-number.tsv',
             '<(mozc_oss_src_dir)/data/preedit/hiragana-romanji.tsv',
             '<(mozc_oss_src_dir)/data/preedit/kana.tsv',
             '<(mozc_oss_src_dir)/data/preedit/notouch-hiragana.tsv',
@@ -393,6 +395,7 @@
             '<(mozc_oss_src_dir)/data/preedit/toggle_flick-halfwidthascii_ios.tsv',
             '<(mozc_oss_src_dir)/data/preedit/toggle_flick-hiragana.tsv',
             '<(mozc_oss_src_dir)/data/preedit/toggle_flick-hiragana_intuitive.tsv',
+            '<(mozc_oss_src_dir)/data/preedit/toggle_flick-number.tsv',
           ],
           'outputs': [
             '<(gen_out_dir)/config_file_stream_data.inc',
@@ -418,36 +421,6 @@
       'dependencies': [
         'absl.gyp:absl_strings',
         'base_core',
-      ],
-    },
-    {
-      'target_name': 'crash_report_handler',
-      'type': 'static_library',
-      'sources': [
-        'crash_report_handler.cc',
-      ],
-      'dependencies': [
-        'base',
-        'base.gyp:version',
-      ],
-      'conditions': [
-        ['OS=="win" and branding=="GoogleJapaneseInput"', {
-          'dependencies': [
-            'breakpad',
-          ],
-        }],
-        ['OS=="mac"', {
-          'hard_dependency': 1,
-          'sources': [
-            'crash_report_handler_mac.mm',
-          ],
-          'sources!': [
-            'crash_report_handler.cc',
-          ],
-          'dependencies': [
-            'breakpad',
-          ],
-        }],
       ],
     },
     {

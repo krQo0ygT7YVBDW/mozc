@@ -40,15 +40,15 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "base/container/freelist.h"
+#include "converter/attribute.h"
+#include "converter/candidate.h"
 #include "converter/node.h"
-#include "converter/segments.h"
 #include "data_manager/testing/mock_data_manager.h"
 #include "dictionary/dictionary_mock.h"
 #include "dictionary/pos_matcher.h"
 #include "prediction/suggestion_filter.h"
 #include "protocol/commands.pb.h"
 #include "request/conversion_request.h"
-#include "request/request_test_util.h"
 #include "testing/gmock.h"
 #include "testing/gunit.h"
 
@@ -98,7 +98,7 @@ class CandidateFilterTest : public ::testing::Test {
             mock_data_manager_.GetSuggestionFilterData())) {}
 
   void SetUp() override {
-    candidate_freelist_ = std::make_unique<FreeList<Segment::Candidate>>(1024);
+    candidate_freelist_ = std::make_unique<FreeList<Candidate>>(1024);
     node_freelist_ = std::make_unique<FreeList<Node>>(1024);
   }
 
@@ -129,8 +129,8 @@ class CandidateFilterTest : public ::testing::Test {
     return n;
   }
 
-  Segment::Candidate *NewCandidate() {
-    Segment::Candidate *c = candidate_freelist_->Alloc();
+  Candidate *NewCandidate() {
+    Candidate *c = candidate_freelist_->Alloc();
     c->cost = 100;
     c->structure_cost = 100;
     return c;
@@ -153,7 +153,7 @@ class CandidateFilterTest : public ::testing::Test {
   MockUserDictionary mock_user_dictionary_;
   const SuggestionFilter suggestion_filter_;
 
-  std::unique_ptr<FreeList<Segment::Candidate>> candidate_freelist_;
+  std::unique_ptr<FreeList<Candidate>> candidate_freelist_;
   std::unique_ptr<FreeList<Node>> node_freelist_;
 };
 
@@ -172,7 +172,7 @@ TEST_P(CandidateFilterTestWithParam, FilterTest) {
   std::vector<const Node *> n;
 
   GetDefaultNodes(&n);
-  Segment::Candidate *c1 = NewCandidate();
+  Candidate *c1 = NewCandidate();
   c1->lid = 1;
   c1->rid = 1;
   c1->key = "abc";
@@ -188,7 +188,7 @@ TEST_P(CandidateFilterTestWithParam, FilterTest) {
   filter->Reset();
 
   // A candidate having the value seen before should be rejected.
-  Segment::Candidate *c2 = NewCandidate();
+  Candidate *c2 = NewCandidate();
   c2->lid = 1;
   c2->rid = 1;
   c2->key = "abc";
@@ -201,7 +201,7 @@ TEST_P(CandidateFilterTestWithParam, FilterTest) {
             CandidateFilter::BAD_CANDIDATE);
 
   // A candidate having high structure cost should be rejected.
-  Segment::Candidate *c3 = NewCandidate();
+  Candidate *c3 = NewCandidate();
   c3->structure_cost = INT_MAX;
   c3->key = "def";
   c3->value = "def";
@@ -210,12 +210,12 @@ TEST_P(CandidateFilterTestWithParam, FilterTest) {
             CandidateFilter::BAD_CANDIDATE);
 
   // Check if a candidate is active before appending many candidates.
-  Segment::Candidate *c4 = NewCandidate();
+  Candidate *c4 = NewCandidate();
   EXPECT_EQ(filter->FilterCandidate(convreq_conv, "", c4, n, n),
             CandidateFilter::GOOD_CANDIDATE);
 
   // Don't filter if lid/rid is the same as that of the top candidate.
-  Segment::Candidate *c5 = NewCandidate();
+  Candidate *c5 = NewCandidate();
   c5->key = "foo";
   c5->value = "foo";
   c5->lid = 1;
@@ -226,7 +226,7 @@ TEST_P(CandidateFilterTestWithParam, FilterTest) {
   // Although CandidateFilter may change its limit, 1000 should always exceed
   // the limit.
   for (int i = 0; i < 1000; ++i) {
-    Segment::Candidate *cand = NewCandidate();
+    Candidate *cand = NewCandidate();
     cand->key = absl::StrFormat("%d", i);
     cand->value = cand->key;
     filter->FilterCandidate(convreq_conv, cand->key, cand, n, n);
@@ -246,7 +246,7 @@ TEST_P(CandidateFilterTestWithParam, DeduplicationTest) {
   GetDefaultNodes(&n);
 
   {
-    Segment::Candidate *cand = NewCandidate();
+    Candidate *cand = NewCandidate();
     cand->lid = 1;
     cand->rid = 1;
     cand->key = "abc";
@@ -258,7 +258,7 @@ TEST_P(CandidateFilterTestWithParam, DeduplicationTest) {
   {
     // If all of lid, rid and value are the same with existing candidates,
     // it is filtered.
-    Segment::Candidate *cand = NewCandidate();
+    Candidate *cand = NewCandidate();
     cand->lid = 1;
     cand->rid = 1;
     cand->key = "abc";
@@ -269,7 +269,7 @@ TEST_P(CandidateFilterTestWithParam, DeduplicationTest) {
 
   {
     // lid is different from existing candidates.
-    Segment::Candidate *cand = NewCandidate();
+    Candidate *cand = NewCandidate();
     cand->lid = 2;
     cand->rid = 1;
     cand->key = "abc";
@@ -280,7 +280,7 @@ TEST_P(CandidateFilterTestWithParam, DeduplicationTest) {
 
   {
     // rid is different from existing candidates.
-    Segment::Candidate *cand = NewCandidate();
+    Candidate *cand = NewCandidate();
     cand->lid = 1;
     cand->rid = 2;
     cand->key = "abc";
@@ -291,7 +291,7 @@ TEST_P(CandidateFilterTestWithParam, DeduplicationTest) {
 
   {
     // value is different from existing candidates.
-    Segment::Candidate *cand = NewCandidate();
+    Candidate *cand = NewCandidate();
     cand->lid = 1;
     cand->rid = 1;
     cand->key = "abc";
@@ -309,7 +309,7 @@ TEST_P(CandidateFilterTestWithParam, KatakanaT13N) {
     std::vector<const Node *> nodes;
     GetDefaultNodes(&nodes);
     // nodes[0] is KatakanaT13N
-    Segment::Candidate *c = NewCandidate();
+    Candidate *c = NewCandidate();
     c->key = "えびし";
     c->value = "abc";
     Node *n = NewNode();
@@ -329,7 +329,7 @@ TEST_P(CandidateFilterTestWithParam, KatakanaT13N) {
     std::vector<const Node *> nodes;
     GetDefaultNodes(&nodes);
     // nodes[1] is KatakanaT13N
-    Segment::Candidate *c = NewCandidate();
+    Candidate *c = NewCandidate();
     c->key = "えびし";
     c->value = "abc";
     Node *n = NewNode();
@@ -346,7 +346,7 @@ TEST_P(CandidateFilterTestWithParam, KatakanaT13N) {
     std::vector<const Node *> nodes;
     GetDefaultNodes(&nodes);
     // nodes[1] is not a functional word
-    Segment::Candidate *c = NewCandidate();
+    Candidate *c = NewCandidate();
     c->key = "えびし";
     c->value = "abc";
     Node *n1 = NewNode();
@@ -370,7 +370,7 @@ TEST_P(CandidateFilterTestWithParam, IsolatedWordOrGeneralSymbol) {
   ConversionRequest::RequestType type = GetParam();
   std::unique_ptr<CandidateFilter> filter(CreateCandidateFilter());
   std::vector<const Node *> nodes;
-  Segment::Candidate *c = NewCandidate();
+  Candidate *c = NewCandidate();
   c->key = "abc";
   c->value = "abc";
 
@@ -440,7 +440,7 @@ TEST_P(CandidateFilterTestWithParam, IsolatedWordOrGeneralSymbol) {
 TEST_F(CandidateFilterTest, IsolatedWordInMultipleNodes) {
   std::unique_ptr<CandidateFilter> filter(CreateCandidateFilter());
 
-  Segment::Candidate *c = NewCandidate();
+  Candidate *c = NewCandidate();
   c->key = "abcisolatedxyz";
   c->value = "abcisolatedxyz";
 
@@ -480,7 +480,7 @@ TEST_P(CandidateFilterTestWithParam, MayHaveMoreCandidates) {
   std::vector<const Node *> n;
   GetDefaultNodes(&n);
 
-  Segment::Candidate *c1 = NewCandidate();
+  Candidate *c1 = NewCandidate();
   c1->key = "abc";
   c1->value = "abc";
   const ConversionRequest convreq1 = ConvReq(type);
@@ -490,7 +490,7 @@ TEST_P(CandidateFilterTestWithParam, MayHaveMoreCandidates) {
   // "seen" rule.
   filter->Reset();
 
-  Segment::Candidate *c2 = NewCandidate();
+  Candidate *c2 = NewCandidate();
   c2->key = "abc";
   c2->value = "abc";
   // Once filter "abc" so that the filter memorizes it.
@@ -503,7 +503,7 @@ TEST_P(CandidateFilterTestWithParam, MayHaveMoreCandidates) {
   EXPECT_EQ(filter->FilterCandidate(convreq3, "abc", c2, n, n),
             CandidateFilter::BAD_CANDIDATE);
 
-  Segment::Candidate *c3 = NewCandidate();
+  Candidate *c3 = NewCandidate();
   c3->structure_cost = INT_MAX;
   c3->key = "def";
   c3->value = "def";
@@ -511,7 +511,7 @@ TEST_P(CandidateFilterTestWithParam, MayHaveMoreCandidates) {
   EXPECT_EQ(filter->FilterCandidate(convreq3, "def", c3, n, n),
             CandidateFilter::BAD_CANDIDATE);
 
-  Segment::Candidate *c4 = NewCandidate();
+  Candidate *c4 = NewCandidate();
   c4->cost = INT_MAX;
   c4->structure_cost = INT_MAX;
   c4->key = "ghi";
@@ -523,13 +523,13 @@ TEST_P(CandidateFilterTestWithParam, MayHaveMoreCandidates) {
   // Insert many valid candidates
   const ConversionRequest convreq4 = ConvReq(ConversionRequest::CONVERSION);
   for (int i = 0; i < 50; ++i) {
-    Segment::Candidate *tmp = NewCandidate();
+    Candidate *tmp = NewCandidate();
     tmp->key = std::to_string(i) + "test";
     tmp->value = tmp->key;
     filter->FilterCandidate(convreq4, tmp->key, tmp, n, n);
   }
 
-  Segment::Candidate *c5 = NewCandidate();
+  Candidate *c5 = NewCandidate();
   c5->cost = INT_MAX;
   c5->structure_cost = INT_MAX;
   c5->value = "ghi";
@@ -551,7 +551,7 @@ TEST_P(CandidateFilterTestWithParam, Regression3437022) {
   std::vector<const Node *> n;
   GetDefaultNodes(&n);
 
-  Segment::Candidate *c1 = NewCandidate();
+  Candidate *c1 = NewCandidate();
   c1->key = "test_key";
   c1->value = "test_value";
 
@@ -607,8 +607,8 @@ TEST_P(CandidateFilterTestWithParam, FilterRealtimeConversionTest) {
   n2->rid = pos_matcher().GetUnknownId();
   n.push_back(n2);
 
-  Segment::Candidate *c1 = NewCandidate();
-  c1->attributes |= Segment::Candidate::REALTIME_CONVERSION;
+  Candidate *c1 = NewCandidate();
+  c1->attributes |= Attribute::REALTIME_CONVERSION;
   c1->key = "PCてすと";
   c1->value = "PCテスト";
   // Don't filter a candidate because it starts with alphabets and
@@ -640,7 +640,7 @@ TEST_P(CandidateFilterTestWithParam, DoNotFilterExchangeableCandidates) {
     top_nodes.push_back(n2);
   }
 
-  Segment::Candidate *c1 = NewCandidate();
+  Candidate *c1 = NewCandidate();
   c1->key = "よかったり";
   c1->value = "よかったり";
   c1->content_key = "よかっ";
@@ -669,7 +669,7 @@ TEST_P(CandidateFilterTestWithParam, DoNotFilterExchangeableCandidates) {
     nodes.push_back(n2);
   }
 
-  Segment::Candidate *c2 = NewCandidate();
+  Candidate *c2 = NewCandidate();
   c2->key = "よかったり";
   c2->value = "良かったり";
   c2->content_key = "よかっ";
@@ -704,7 +704,7 @@ TEST_P(CandidateFilterTestWithParam, DoNotFilterExchangeableCandidates) {
     nodes.push_back(n3);
   }
 
-  Segment::Candidate *c3 = NewCandidate();
+  Candidate *c3 = NewCandidate();
   c3->key = "よかったり";
   c3->value = "よ買ったり";
   c3->content_key = "よかっ";
@@ -739,7 +739,7 @@ TEST_P(CandidateFilterTestWithParam,
     nodes1.push_back(n2);
   }
 
-  Segment::Candidate *c1 = NewCandidate();
+  Candidate *c1 = NewCandidate();
   c1->key = "ようずみ";
   c1->value = "用済み";
   c1->content_key = "よう";
@@ -764,7 +764,7 @@ TEST_P(CandidateFilterTestWithParam,
     nodes2.push_back(n2);
   }
 
-  Segment::Candidate *c2 = NewCandidate();
+  Candidate *c2 = NewCandidate();
   c2->key = "ようずみ";
   c2->value = "洋済み";
   c2->content_key = "よう";
@@ -776,6 +776,76 @@ TEST_P(CandidateFilterTestWithParam,
             CandidateFilter::GOOD_CANDIDATE);
   EXPECT_EQ(filter->FilterCandidate(convreq, c2->key, c2, nodes1, nodes2),
             CandidateFilter::BAD_CANDIDATE);
+}
+
+TEST_P(CandidateFilterTestWithParam, NotFilteringAntiPhraseNode) {
+  ConversionRequest::RequestType type = GetParam();
+  std::unique_ptr<CandidateFilter> filter(CreateCandidateFilter());
+  std::vector<const Node *> top_nodes;
+  std::vector<const Node *> nodes;
+  const ConversionRequest convreq = ConvReq(type);
+
+  {
+    // Set "選考とともに" as the top candidate to the `filter` object.
+    // The top candidate is not filtered in any case.
+    Node *n1 = NewNode();
+    n1->key = "せんこう";
+    n1->value = "選考";
+    n1->lid = pos_matcher().GetGeneralNounId();
+    n1->rid = pos_matcher().GetGeneralNounId();
+    top_nodes.push_back(n1);
+
+    Node *n2 = NewNode();
+    n2->key = "とともに";
+    n2->value = "とともに";
+    n2->lid = pos_matcher().GetAdverbSegmentSuffixId();
+    n2->rid = pos_matcher().GetAdverbId();
+    top_nodes.push_back(n2);
+    EXPECT_NE(n2->lid, n2->rid);
+
+    Candidate *c = NewCandidate();
+    c->key = n1->key + n2->key;
+    c->value = n1->value + n2->value;
+    c->content_key = n1->key;
+    c->content_value = n1->value;
+    c->cost = 6000;
+    c->structure_cost = 500;
+
+    EXPECT_EQ(filter->FilterCandidate(convreq, c->key, c, top_nodes, top_nodes),
+              CandidateFilter::GOOD_CANDIDATE);
+  }
+  {
+    // Confirm "閃光とともに" is not filtered although it is not the top
+    // candidate.
+    Node *n1 = NewNode();
+    n1->key = "せんこう";
+    n1->value = "閃光";
+    n1->lid = pos_matcher().GetGeneralNounId();
+    n1->rid = pos_matcher().GetGeneralNounId();
+    nodes.push_back(n1);
+
+    // n2 (i.e. "と + ともに") is a compound word as lid != rid.
+    // Compound words are usually filtered, but the anti-phrase node is an
+    // exception.
+    Node *n2 = NewNode();
+    n2->key = "とともに";
+    n2->value = "とともに";
+    n2->lid = pos_matcher().GetAdverbSegmentSuffixId();
+    n2->rid = pos_matcher().GetAdverbId();
+    nodes.push_back(n2);
+    EXPECT_NE(n2->lid, n2->rid);
+
+    Candidate *c = NewCandidate();
+    c->key = n1->key + n2->key;
+    c->value = n1->value + n2->value;
+    c->content_key = n1->key;
+    c->content_value = n1->value;
+    c->cost = 6000;
+    c->structure_cost = 500;
+
+    EXPECT_EQ(filter->FilterCandidate(convreq, c->key, c, top_nodes, nodes),
+              CandidateFilter::GOOD_CANDIDATE);
+  }
 }
 
 TEST_P(CandidateFilterTestWithParam, FilterMultipleNumberNodesWord) {
@@ -800,7 +870,7 @@ TEST_P(CandidateFilterTestWithParam, FilterMultipleNumberNodesWord) {
     nodes1.push_back(n2);
   }
 
-  Segment::Candidate *c1 = NewCandidate();
+  Candidate *c1 = NewCandidate();
   c1->key = "にじゅうさんじゅう";
   c1->value = "2十三重";
   c1->content_key = "に";
@@ -821,7 +891,7 @@ TEST_P(CandidateFilterTestWithParam, FilterMultipleNumberNodesWord) {
     nodes2.push_back(n1);
   }
 
-  Segment::Candidate *c2 = NewCandidate();
+  Candidate *c2 = NewCandidate();
   c2->key = "にじゅうさんじゅう";
   c2->value = "二重三重";
   c2->content_key = "にじゅうさんじゅう";
@@ -863,7 +933,7 @@ TEST_P(CandidateFilterTestWithParam, FilterMultipleNumberNodesWord) {
     nodes3.push_back(n4);
   }
 
-  Segment::Candidate *c3 = NewCandidate();
+  Candidate *c3 = NewCandidate();
   c3->key = "10まんえん";
   c3->value = "10万円";
   c3->content_key = "10";
@@ -901,7 +971,7 @@ TEST_P(CandidateFilterTestWithParam, FilterNoisyNumberCandidate) {
     nodes1.push_back(n2);
   }
 
-  Segment::Candidate *c1 = NewCandidate();
+  Candidate *c1 = NewCandidate();
   c1->key = "さんです";
   c1->value = "3です";
   c1->content_key = "さん";
@@ -929,7 +999,7 @@ TEST_P(CandidateFilterTestWithParam, FilterNoisyNumberCandidate) {
     nodes2.push_back(n2);
   }
 
-  Segment::Candidate *c2 = NewCandidate();
+  Candidate *c2 = NewCandidate();
   c2->key = "しんじゅくに";
   c2->value = "新宿二";
   c2->content_key = "しんじゅく";
@@ -957,7 +1027,7 @@ TEST_P(CandidateFilterTestWithParam, FilterNoisyNumberCandidate) {
     nodes3.push_back(n2);
   }
 
-  Segment::Candidate *c3 = NewCandidate();
+  Candidate *c3 = NewCandidate();
   c3->key = "ginza7";
   c3->value = "GINZA7";
   c3->content_key = "ginza";
@@ -990,7 +1060,7 @@ TEST_P(CandidateFilterTestWithParam, FilterNoisyNumberCandidate) {
     nodes4.push_back(n3);
   }
 
-  Segment::Candidate *c4 = NewCandidate();
+  Candidate *c4 = NewCandidate();
   c4->key = "にねんご";
   c4->value = "2年後";
   c4->content_key = "に";
@@ -1014,7 +1084,7 @@ TEST_F(CandidateFilterTest, CapabilityOfSuggestionFilterConversion) {
     std::vector<const Node *> nodes;
     nodes.push_back(n);
 
-    Segment::Candidate *c = NewCandidate();
+    Candidate *c = NewCandidate();
     c->key = n->key;
     c->value = n->value;
     c->content_key = n->key;
@@ -1042,7 +1112,7 @@ TEST_F(CandidateFilterTest, CapabilityOfSuggestionFilterSuggestion) {
     std::vector<const Node *> nodes;
     nodes.push_back(n);
 
-    Segment::Candidate *c = NewCandidate();
+    Candidate *c = NewCandidate();
     c->key = n->key;
     c->value = n->value;
     c->content_key = n->key;
@@ -1074,7 +1144,7 @@ TEST_F(CandidateFilterTest, CapabilityOfSuggestionFilterSuggestion) {
     nodes.push_back(n1);
     nodes.push_back(n2);
 
-    Segment::Candidate *c = NewCandidate();
+    Candidate *c = NewCandidate();
     c->key = absl::StrCat(n1->key, n2->key);
     c->value = absl::StrCat(n1->value, n2->value);
     c->content_key = c->key;
@@ -1113,7 +1183,7 @@ TEST_F(CandidateFilterTest, CapabilityOfSuggestionFilterSuggestion) {
     nodes.push_back(n2);
     nodes.push_back(n3);
 
-    Segment::Candidate *c = NewCandidate();
+    Candidate *c = NewCandidate();
     c->key = absl::StrCat(n1->key, n2->key, n3->key);
     c->value = absl::StrCat(n1->value, n2->value, n3->value);
     c->content_key = c->key;
@@ -1147,7 +1217,7 @@ TEST_F(CandidateFilterTest, CapabilityOfSuggestionFilterPrediction) {
     std::vector<const Node *> nodes;
     nodes.push_back(n);
 
-    Segment::Candidate *c = NewCandidate();
+    Candidate *c = NewCandidate();
     c->key = n->key;
     c->value = n->value;
     c->content_key = n->key;
@@ -1181,7 +1251,7 @@ TEST_F(CandidateFilterTest, CapabilityOfSuggestionFilterPrediction) {
     nodes.push_back(n1);
     nodes.push_back(n2);
 
-    Segment::Candidate *c = NewCandidate();
+    Candidate *c = NewCandidate();
     c->key = absl::StrCat(n1->key, n2->key);
     c->value = absl::StrCat(n1->value, n2->value);
     c->content_key = c->key;
@@ -1221,7 +1291,7 @@ TEST_F(CandidateFilterTest, CapabilityOfSuggestionFilterPrediction) {
     nodes.push_back(n2);
     nodes.push_back(n3);
 
-    Segment::Candidate *c = NewCandidate();
+    Candidate *c = NewCandidate();
     c->key = absl::StrCat(n1->key, n2->key, n3->key);
     c->value = absl::StrCat(n1->value, n2->value, n3->value);
     c->content_key = c->key;
@@ -1260,7 +1330,7 @@ TEST_F(CandidateFilterTest, ReverseConversion) {
   nodes.push_back(n2);
 
   {
-    Segment::Candidate *c = NewCandidate();
+    Candidate *c = NewCandidate();
     c->key.assign(n1->key);
     c->value.assign(n1->value);
     c->content_key = c->key;
@@ -1275,7 +1345,7 @@ TEST_F(CandidateFilterTest, ReverseConversion) {
   }
   {
     // White space should be valid candidate.
-    Segment::Candidate *c = NewCandidate();
+    Candidate *c = NewCandidate();
     c->key.assign(n2->key);
     c->value.assign(n2->value);
     c->content_key = c->key;

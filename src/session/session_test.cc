@@ -49,6 +49,7 @@
 #include "composer/key_parser.h"
 #include "composer/table.h"
 #include "config/config_handler.h"
+#include "converter/candidate.h"
 #include "converter/converter_mock.h"
 #include "converter/segments.h"
 #include "data_manager/testing/mock_data_manager.h"
@@ -68,13 +69,26 @@
 #include "testing/gmock.h"
 #include "testing/gunit.h"
 #include "testing/mozctest.h"
+#include "testing/test_peer.h"
 #include "transliteration/transliteration.h"
 
 namespace mozc {
 
 namespace session {
-namespace {
 
+class SessionTestPeer : testing::TestPeer<Session> {
+ public:
+  explicit SessionTestPeer(Session &session)
+      : testing::TestPeer<Session>(session) {}
+
+  PEER_METHOD(IsFullWidthInsertSpace);
+  PEER_METHOD(PushUndoContext);
+
+  PEER_VARIABLE(context_);
+  PEER_VARIABLE(undo_contexts_);
+};
+
+namespace {
 using ::mozc::commands::Request;
 using ::testing::_;
 using ::testing::DoAll;
@@ -189,20 +203,20 @@ bool InsertCharacterCodeAndString(const char key_code,
   return session->InsertCharacter(command);
 }
 
-Segment::Candidate *AddCandidate(const absl::string_view key,
-                                 const absl::string_view value,
-                                 Segment *segment) {
-  Segment::Candidate *candidate = segment->add_candidate();
+converter::Candidate *AddCandidate(const absl::string_view key,
+                                   const absl::string_view value,
+                                   Segment *segment) {
+  converter::Candidate *candidate = segment->add_candidate();
   strings::Assign(candidate->key, key);
   strings::Assign(candidate->content_key, key);
   strings::Assign(candidate->value, value);
   return candidate;
 }
 
-Segment::Candidate *AddMetaCandidate(const absl::string_view key,
-                                     const absl::string_view value,
-                                     Segment *segment) {
-  Segment::Candidate *candidate = segment->add_meta_candidate();
+converter::Candidate *AddMetaCandidate(const absl::string_view key,
+                                       const absl::string_view value,
+                                       Segment *segment) {
+  converter::Candidate *candidate = segment->add_meta_candidate();
   strings::Assign(candidate->key, key);
   strings::Assign(candidate->content_key, key);
   strings::Assign(candidate->value, value);
@@ -458,7 +472,7 @@ class SessionTest : public testing::TestWithTempUserProfile {
   void SetAiueo(Segments *segments) {
     segments->Clear();
     Segment *segment;
-    Segment::Candidate *candidate;
+    converter::Candidate *candidate;
 
     segment = segments->add_segment();
     segment->set_key("あいうえお");
@@ -543,7 +557,7 @@ class SessionTest : public testing::TestWithTempUserProfile {
   // set result for "like"
   void SetLike(Segments *segments) {
     Segment *segment;
-    Segment::Candidate *candidate;
+    converter::Candidate *candidate;
 
     segments->Clear();
     segment = segments->add_segment();
@@ -585,7 +599,7 @@ class SessionTest : public testing::TestWithTempUserProfile {
     Segment *segment;
     segment = reverse_segments.add_segment();
     segment->set_key(kanji);
-    Segment::Candidate *candidate;
+    converter::Candidate *candidate;
     candidate = segment->add_candidate();
     // For reverse conversion, key is the original kanji string.
     candidate->key = kanji;
@@ -658,8 +672,11 @@ class SessionTest : public testing::TestWithTempUserProfile {
       segment->set_key("");
       AddCandidate("search", "search", segment);
       AddCandidate("input", "input", segment);
-      EXPECT_CALL(*mock_converter, StartPrediction(_, _))
-          .WillRepeatedly(DoAll(SetArgPointee<1>(segments), Return(true)));
+      EXPECT_CALL(*mock_converter,
+                  StartPredictionWithPreviousSuggestion(_, _, _))
+          .WillRepeatedly(DoAll(SetArgPointee<2>(segments), Return(true)));
+      EXPECT_CALL(*mock_converter, PrependCandidates(_, _, _))
+          .WillRepeatedly(SetArgPointee<2>(segments));
     }
   }
 
@@ -680,7 +697,7 @@ class SessionTest : public testing::TestWithTempUserProfile {
       SetAiueo(&segments);
       // Don't use FillT13Ns(). It makes platform dependent segments.
       // TODO(hsumita): Makes FillT13Ns() independent from platforms.
-      Segment::Candidate *candidate;
+      converter::Candidate *candidate;
       candidate = segments.mutable_segment(0)->add_candidate();
       candidate->value = "aiueo";
       candidate = segments.mutable_segment(0)->add_candidate();
@@ -1212,7 +1229,7 @@ TEST_F(SessionTest, ResetFocusedSegmentAfterCommit) {
   Segments segments;
   Segment *segment = segments.add_segment();
   segment->set_key("わたしの");
-  Segment::Candidate *candidate = segment->add_candidate();
+  converter::Candidate *candidate = segment->add_candidate();
   candidate->value = "私の";
   candidate = segment->add_candidate();
   candidate->value = "わたしの";
@@ -1314,7 +1331,7 @@ TEST_F(SessionTest, ResetFocusedSegmentAfterCancel) {
   Segments segments;
   Segment *segment = segments.add_segment();
   segment->set_key("あい");
-  Segment::Candidate *candidate = segment->add_candidate();
+  converter::Candidate *candidate = segment->add_candidate();
   candidate->value = "愛";
   candidate = segment->add_candidate();
   candidate->value = "相";
@@ -1402,7 +1419,7 @@ TEST_F(SessionTest, KeepFixedCandidateAfterSegmentWidthExpand) {
   Segments segments;
   Segment *segment = segments.add_segment();
   segment->set_key("ばりに");
-  Segment::Candidate *candidate = segment->add_candidate();
+  converter::Candidate *candidate = segment->add_candidate();
   candidate->value = "バリに";
   candidate = segment->add_candidate();
   candidate->value = "針に";
@@ -1482,7 +1499,7 @@ TEST_F(SessionTest, CommitSegment) {
   Segments segments;
   Segment *segment = segments.add_segment();
   segment->set_key("わたしの");
-  Segment::Candidate *candidate = segment->add_candidate();
+  converter::Candidate *candidate = segment->add_candidate();
   candidate->value = "私の";
   candidate = segment->add_candidate();
   candidate->value = "わたしの";
@@ -1541,7 +1558,7 @@ TEST_F(SessionTest, CommitSegmentAt2ndSegment) {
   Segments segments;
   Segment *segment = segments.add_segment();
   segment->set_key("わたしの");
-  Segment::Candidate *candidate = segment->add_candidate();
+  converter::Candidate *candidate = segment->add_candidate();
   candidate->value = "私の";
   segment = segments.add_segment();
   segment->set_key("はは");
@@ -1598,7 +1615,7 @@ TEST_F(SessionTest, Transliterations) {
   Segments segments;
   Segment *segment = segments.add_segment();
   segment->set_key("じしん");
-  Segment::Candidate *candidate = segment->add_candidate();
+  converter::Candidate *candidate = segment->add_candidate();
   candidate->value = "自信";
   candidate = segment->add_candidate();
   candidate->value = "自身";
@@ -1660,7 +1677,7 @@ TEST_F(SessionTest, ConvertToTransliteration) {
   Segments segments;
   Segment *segment = segments.add_segment();
   segment->set_key("じしん");
-  Segment::Candidate *candidate = segment->add_candidate();
+  converter::Candidate *candidate = segment->add_candidate();
   candidate->value = "自信";
   candidate = segment->add_candidate();
   candidate->value = "自身";
@@ -1699,7 +1716,7 @@ TEST_F(SessionTest, ConvertToTransliterationOfNegativeNumber) {
   Segments segments;
   Segment *segment = segments.add_segment();
   segment->set_key("−７８９");
-  Segment::Candidate *candidate = segment->add_candidate();
+  converter::Candidate *candidate = segment->add_candidate();
   candidate->value = "−７８９";
 
   const ConversionRequest request = CreateConversionRequest(session);
@@ -1764,7 +1781,6 @@ TEST_F(SessionTest, ConvertToTransliterationWithMultipleSegments) {
 }
 
 TEST_F(SessionTest, ConvertToHalfWidth) {
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -1798,7 +1814,6 @@ TEST_F(SessionTest, ConvertToHalfWidth) {
 }
 
 TEST_F(SessionTest, ConvertConsonantsToFullAlphanumeric) {
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -1810,7 +1825,7 @@ TEST_F(SessionTest, ConvertConsonantsToFullAlphanumeric) {
   Segments segments;
   Segment *segment = segments.add_segment();
   segment->set_key("ｄｖｄ");
-  Segment::Candidate *candidate = segment->add_candidate();
+  converter::Candidate *candidate = segment->add_candidate();
   candidate->value = "DVD";
   candidate = segment->add_candidate();
   candidate->value = "dvd";
@@ -1838,7 +1853,6 @@ TEST_F(SessionTest, ConvertConsonantsToFullAlphanumeric) {
 }
 
 TEST_F(SessionTest, ConvertConsonantsToFullAlphanumericWithoutCascadingWindow) {
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -1855,7 +1869,7 @@ TEST_F(SessionTest, ConvertConsonantsToFullAlphanumericWithoutCascadingWindow) {
   Segments segments;
   Segment *segment = segments.add_segment();
   segment->set_key("ｄｖｄ");
-  Segment::Candidate *candidate = segment->add_candidate();
+  converter::Candidate *candidate = segment->add_candidate();
   candidate->value = "DVD";
   candidate = segment->add_candidate();
   candidate->value = "dvd";
@@ -1884,7 +1898,6 @@ TEST_F(SessionTest, ConvertConsonantsToFullAlphanumericWithoutCascadingWindow) {
 
 // Convert input string to Hiragana, Katakana, and Half Katakana
 TEST_F(SessionTest, SwitchKanaType) {
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -1969,7 +1982,6 @@ TEST_F(SessionTest, SwitchKanaType) {
 
 // Rotate input mode among Hiragana, Katakana, and Half Katakana
 TEST_F(SessionTest, InputModeSwitchKanaType) {
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -2055,7 +2067,6 @@ TEST_F(SessionTest, InputModeSwitchKanaType) {
 }
 
 TEST_F(SessionTest, TranslateHalfWidth) {
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -2078,7 +2089,6 @@ TEST_F(SessionTest, TranslateHalfWidth) {
 }
 
 TEST_F(SessionTest, UpdatePreferences) {
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -2148,7 +2158,6 @@ TEST_F(SessionTest, RomajiInput) {
   table->AddRule("na", "な", "");
   // This rule makes the "n" rule ambiguous.
 
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -2166,7 +2175,7 @@ TEST_F(SessionTest, RomajiInput) {
   Segments segments;
   Segment *segment = segments.add_segment();
   segment->set_key("ぱん");
-  Segment::Candidate *candidate = segment->add_candidate();
+  converter::Candidate *candidate = segment->add_candidate();
   candidate->value = "パン";
 
   const ConversionRequest request = CreateConversionRequest(session);
@@ -2186,7 +2195,6 @@ TEST_F(SessionTest, KanaInput) {
   auto table = std::make_shared<composer::Table>();
   table->AddRule("す゛", "ず", "");
 
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -2220,7 +2228,7 @@ TEST_F(SessionTest, KanaInput) {
   Segments segments;
   Segment *segment = segments.add_segment();
   segment->set_key("もずく!");
-  Segment::Candidate *candidate = segment->add_candidate();
+  converter::Candidate *candidate = segment->add_candidate();
   candidate->value = "もずく！";
 
   const ConversionRequest request = CreateConversionRequest(session);
@@ -2234,7 +2242,6 @@ TEST_F(SessionTest, KanaInput) {
 }
 
 TEST_F(SessionTest, ExceededComposition) {
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -2253,7 +2260,7 @@ TEST_F(SessionTest, ExceededComposition) {
   Segments segments;
   Segment *segment = segments.add_segment();
   segment->set_key(long_a);
-  Segment::Candidate *candidate = segment->add_candidate();
+  converter::Candidate *candidate = segment->add_candidate();
   candidate->value = long_a;
 
   const ConversionRequest request = CreateConversionRequest(session);
@@ -2275,7 +2282,6 @@ TEST_F(SessionTest, ExceededComposition) {
 }
 
 TEST_F(SessionTest, OutputAllCandidateWords) {
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -2349,7 +2355,6 @@ TEST_F(SessionTest, OutputAllCandidateWords) {
 }
 
 TEST_F(SessionTest, UndoForComposition) {
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -2397,11 +2402,11 @@ TEST_F(SessionTest, UndoForComposition) {
 }
 
 TEST_F(SessionTest, RequestUndo) {
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
   Session session(engine);
+  SessionTestPeer session_peer(session);
 
   // It is OK not to check ImeContext::DIRECT because you cannot
   // assign any key event to Undo command in DIRECT mode.
@@ -2419,17 +2424,16 @@ TEST_F(SessionTest, RequestUndo) {
 
   InitSessionToPrecomposition(&session);
   SetUndoContext(&session, converter.get());
-  session.context_->set_state(ImeContext::COMPOSITION);
+  session_peer.context_()->set_state(ImeContext::COMPOSITION);
   EXPECT_TRUE(TryUndoAndAssertSuccess(&session));
 
   InitSessionToPrecomposition(&session);
   SetUndoContext(&session, converter.get());
-  session.context_->set_state(ImeContext::CONVERSION);
+  session_peer.context_()->set_state(ImeContext::CONVERSION);
   EXPECT_TRUE(TryUndoAndAssertSuccess(&session));
 }
 
 TEST_F(SessionTest, UndoForSingleSegment) {
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -2450,7 +2454,7 @@ TEST_F(SessionTest, UndoForSingleSegment) {
     SetAiueo(&segments);
     // Don't use FillT13Ns(). It makes platform dependent segments.
     // TODO(hsumita): Makes FillT13Ns() independent from platforms.
-    Segment::Candidate *candidate;
+    converter::Candidate *candidate;
     candidate = segments.mutable_segment(0)->add_candidate();
     candidate->value = "aiueo";
     candidate = segments.mutable_segment(0)->add_candidate();
@@ -2562,7 +2566,6 @@ TEST_F(SessionTest, UndoForSingleSegment) {
 }
 
 TEST_F(SessionTest, ClearUndoContextByKeyEventIssue5529702) {
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -2601,7 +2604,6 @@ TEST_F(SessionTest, ClearUndoContextByKeyEventIssue5529702) {
 }
 
 TEST_F(SessionTest, UndoForMultipleSegments) {
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -2619,7 +2621,7 @@ TEST_F(SessionTest, UndoForMultipleSegments) {
   {  // Create segments
     InsertCharacterChars("key1key2key3", &session, &command);
 
-    Segment::Candidate *candidate;
+    converter::Candidate *candidate;
     Segment *segment;
 
     segment = segments.add_segment();
@@ -2771,7 +2773,6 @@ TEST_F(SessionTest, UndoForMultipleSegments) {
 }
 
 TEST_F(SessionTest, UndoForCommittedBracketPairIssue284235847) {
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -2789,7 +2790,7 @@ TEST_F(SessionTest, UndoForCommittedBracketPairIssue284235847) {
   {  // Create segments
     InsertCharacterChars("あかっこ", &session, &command);
 
-    Segment::Candidate *candidate;
+    converter::Candidate *candidate;
     Segment *segment;
 
     segment = segments.add_segment();
@@ -2844,7 +2845,6 @@ TEST_F(SessionTest, UndoForCommittedBracketPairIssue284235847) {
 }
 
 TEST_F(SessionTest, MultipleUndo) {
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -2862,7 +2862,7 @@ TEST_F(SessionTest, MultipleUndo) {
   {  // Create segments
     InsertCharacterChars("key1key2key3", &session, &command);
 
-    Segment::Candidate *candidate;
+    converter::Candidate *candidate;
     Segment *segment;
 
     segment = segments.add_segment();
@@ -2946,7 +2946,6 @@ TEST_F(SessionTest, MultipleUndo) {
 }
 
 TEST_F(SessionTest, UndoOrRewindUndo) {
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -2965,7 +2964,7 @@ TEST_F(SessionTest, UndoOrRewindUndo) {
     {  // Create segments
       InsertCharacterChars("aiueo", &session, &command);
       SetAiueo(&segments);
-      Segment::Candidate *candidate;
+      converter::Candidate *candidate;
       candidate = segments.mutable_segment(0)->add_candidate();
       candidate->value = "aiueo";
       candidate = segments.mutable_segment(0)->add_candidate();
@@ -3004,7 +3003,6 @@ TEST_F(SessionTest, UndoOrRewindUndo) {
 }
 
 TEST_F(SessionTest, UndoOrRewindRewind) {
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -3016,7 +3014,7 @@ TEST_F(SessionTest, UndoOrRewindRewind) {
     Segments segments;
     InsertCharacterChars("aiueo", &session, &command);
     SetAiueo(&segments);
-    Segment::Candidate *candidate;
+    converter::Candidate *candidate;
     candidate = segments.mutable_segment(0)->add_candidate();
     candidate->value = "aiueo";
     candidate = segments.mutable_segment(0)->add_candidate();
@@ -3063,7 +3061,6 @@ TEST_F(SessionTest, UndoOrRewindRewind) {
 }
 
 TEST_F(SessionTest, StopKeyToggling) {
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -3099,7 +3096,6 @@ TEST_F(SessionTest, StopKeyToggling) {
 }
 
 TEST_F(SessionTest, CommitRawText) {
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -3160,7 +3156,6 @@ TEST_F(SessionTest, CommitRawTextKanaInput) {
   auto table = std::make_shared<composer::Table>();
   table->AddRule("す゛", "ず", "");
 
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -3199,7 +3194,6 @@ TEST_F(SessionTest, CommitRawTextKanaInput) {
 }
 
 TEST_F(SessionTest, ConvertNextPagePrevPage) {
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -3308,7 +3302,6 @@ TEST_F(SessionTest, ConvertNextPagePrevPage) {
 
 TEST_F(SessionTest, NeedlessClearUndoContext) {
   // This is a unittest against http://b/3423910.
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -3387,7 +3380,6 @@ TEST_F(SessionTest, NeedlessClearUndoContext) {
 }
 
 TEST_F(SessionTest, ClearUndoContextAfterDirectInputAfterConversion) {
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -3434,7 +3426,6 @@ TEST_F(SessionTest, ClearUndoContextAfterDirectInputAfterConversion) {
 }
 
 TEST_F(SessionTest, TemporaryInputModeAfterUndo) {
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -3505,7 +3496,6 @@ TEST_F(SessionTest, TemporaryInputModeAfterUndo) {
 }
 
 TEST_F(SessionTest, DCHECKFailureAfterUndo) {
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -3540,7 +3530,6 @@ TEST_F(SessionTest, DCHECKFailureAfterUndo) {
 }
 
 TEST_F(SessionTest, ConvertToFullOrHalfAlphanumericAfterUndo) {
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -3606,7 +3595,6 @@ TEST_F(SessionTest, ComposeVoicedSoundMarkAfterUndoIssue5369632) {
   config::Config config;
   config.set_preedit_method(config::Config::KANA);
 
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -3642,7 +3630,6 @@ TEST_F(SessionTest, SpaceOnAlphanumeric) {
   commands::Request request;
   commands::Command command;
 
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -3704,7 +3691,6 @@ TEST_F(SessionTest, SpaceOnAlphanumeric) {
 
 TEST_F(SessionTest, Issue1805239) {
   // This is a unittest against http://b/1805239.
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -3717,7 +3703,7 @@ TEST_F(SessionTest, Issue1805239) {
   Segments segments;
   Segment *segment = segments.add_segment();
   segment->set_key("わたしの");
-  Segment::Candidate *candidate = segment->add_candidate();
+  converter::Candidate *candidate = segment->add_candidate();
   candidate->value = "私の";
   candidate = segment->add_candidate();
   candidate->value = "渡しの";
@@ -3759,7 +3745,6 @@ TEST_F(SessionTest, Issue1805239) {
 
 TEST_F(SessionTest, Issue1816861) {
   // This is a unittest against http://b/1816861
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -3771,7 +3756,7 @@ TEST_F(SessionTest, Issue1816861) {
   Segments segments;
   Segment *segment = segments.add_segment();
   segment->set_key("かまぼこの");
-  Segment::Candidate *candidate = segment->add_candidate();
+  converter::Candidate *candidate = segment->add_candidate();
   candidate->value = "かまぼこの";
   candidate = segment->add_candidate();
   candidate->value = "カマボコの";
@@ -3811,15 +3796,14 @@ TEST_F(SessionTest, Issue1816861) {
   candidate = segment->add_candidate();
   candidate->value = "陰謀説";
 
-  EXPECT_CALL(*converter, StartPrediction(_, _))
-      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+  EXPECT_CALL(*converter, StartPredictionWithPreviousSuggestion(_, _, _))
+      .WillOnce(DoAll(SetArgPointee<2>(segments), Return(true)));
 
   SendSpecialKey(commands::KeyEvent::TAB, &session, &command);
 }
 
 TEST_F(SessionTest, T13NWithResegmentation) {
   // This is a unittest against http://b/3272827
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -3834,7 +3818,7 @@ TEST_F(SessionTest, T13NWithResegmentation) {
     Segment *segment;
     segment = segments.add_segment();
     segment->set_key("かまぼこの");
-    Segment::Candidate *candidate = segment->add_candidate();
+    converter::Candidate *candidate = segment->add_candidate();
     candidate->value = "かまぼこの";
     candidate = segment->add_candidate();
     candidate->value = "カマボコの";
@@ -3854,7 +3838,7 @@ TEST_F(SessionTest, T13NWithResegmentation) {
     Segments segments;
     Segment *segment = segments.add_segment();
     segment->set_key("かまぼこの");
-    Segment::Candidate *candidate = segment->add_candidate();
+    converter::Candidate *candidate = segment->add_candidate();
     candidate->value = "かまぼこの";
     candidate = segment->add_candidate();
     candidate->value = "カマボコの";
@@ -3909,7 +3893,6 @@ TEST_F(SessionTest, Shortcut) {
     config::Config config;
     config.set_selection_shortcut(shortcut);
 
-    ;
     MockEngine engine;
     std::shared_ptr<MockConverter> converter =
         CreateEngineConverterMock(&engine);
@@ -3955,7 +3938,6 @@ TEST_F(SessionTest, ShortcutWithCapsLockIssue5655743) {
   config::Config config;
   config.set_selection_shortcut(config::Config::SHORTCUT_ASDFGHJKL);
 
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -4000,7 +3982,6 @@ TEST_F(SessionTest, ShortcutFromVK) {
   Request client_request;
   client_request.set_special_romanji_table(Request::QWERTY_MOBILE_TO_HIRAGANA);
 
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -4040,7 +4021,6 @@ TEST_F(SessionTest, ShortcutFromVK) {
 }
 
 TEST_F(SessionTest, NumpadKey) {
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -4151,7 +4131,6 @@ TEST_F(SessionTest, KanaSymbols) {
   config.set_punctuation_method(config::Config::COMMA_PERIOD);
   config.set_symbol_method(config::Config::CORNER_BRACKET_SLASH);
 
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -4184,7 +4163,6 @@ TEST_F(SessionTest, KanaSymbols) {
 }
 
 TEST_F(SessionTest, InsertCharacterWithShiftKey) {
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -4223,9 +4201,8 @@ TEST_F(SessionTest, InsertCharacterWithShiftKey) {
   }
 }
 
-TEST_F(SessionTest, ExitTemporaryAlphanumModeAfterCommittingSugesstion1) {
+TEST_F(SessionTest, ExitTemporaryAlphanumModeAfterCommittingSuggestion1) {
   // This is a unittest against http://b/2977131.
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -4264,9 +4241,8 @@ TEST_F(SessionTest, ExitTemporaryAlphanumModeAfterCommittingSugesstion1) {
   EXPECT_EQ(command.output().status().comeback_mode(), commands::HIRAGANA);
 }
 
-TEST_F(SessionTest, ExitTemporaryAlphanumModeAfterCommittingSugesstion2) {
+TEST_F(SessionTest, ExitTemporaryAlphanumModeAfterCommittingSuggestion2) {
   // This is a unittest against http://b/2977131.
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -4279,12 +4255,14 @@ TEST_F(SessionTest, ExitTemporaryAlphanumModeAfterCommittingSugesstion2) {
   // Global mode should be kept as HIRAGANA
   EXPECT_EQ(command.output().status().comeback_mode(), commands::HIRAGANA);
 
-  Segments segments;
-  Segment *segment = segments.add_segment();
-  segment->set_key("NFL");
-  segment->add_candidate()->value = "NFL";
-  EXPECT_CALL(*converter, StartPrediction(_, _))
-      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+  {
+    Segments segments;
+    Segment *segment = segments.add_segment();
+    segment->set_key("NFL");
+    segment->add_candidate()->value = "NFL";
+    EXPECT_CALL(*converter, StartPredictionWithPreviousSuggestion(_, _, _))
+        .WillOnce(DoAll(SetArgPointee<2>(segments), Return(true)));
+  }
 
   EXPECT_TRUE(session.PredictAndConvert(&command));
   ASSERT_TRUE(command.output().has_candidate_window());
@@ -4295,8 +4273,6 @@ TEST_F(SessionTest, ExitTemporaryAlphanumModeAfterCommittingSugesstion2) {
   EXPECT_EQ(command.output().status().mode(), commands::HIRAGANA);
   EXPECT_EQ(command.output().status().comeback_mode(), commands::HIRAGANA);
 
-  EXPECT_CALL(*converter, StartPrediction(_, _))
-      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(false)));
   EXPECT_TRUE(SendKey("a", &session, &command));
   EXPECT_FALSE(command.output().has_candidate_window());
   EXPECT_RESULT("NFL", command);
@@ -4308,7 +4284,6 @@ TEST_F(SessionTest, ExitTemporaryAlphanumModeAfterCommittingSugesstion2) {
 
 TEST_F(SessionTest, ExitTemporaryAlphanumModeAfterCommittingSugesstion3) {
   // This is a unittest against http://b/2977131.
-  ;
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
 
@@ -4585,11 +4560,11 @@ TEST_F(SessionTest, CommitCandidateTypingCorrection) {
   Segment *segment = segments_jueri.add_segment();
   constexpr absl::string_view kJueri = "じゅえり";
   segment->set_key(kJueri);
-  Segment::Candidate *candidate = segment->add_candidate();
+  converter::Candidate *candidate = segment->add_candidate();
   candidate->key = "くえり";
   candidate->content_key = candidate->key;
   candidate->value = "クエリ";
-  candidate->attributes = Segment::Candidate::PARTIALLY_KEY_CONSUMED;
+  candidate->attributes = converter::Candidate::PARTIALLY_KEY_CONSUMED;
   candidate->consumed_key_size = strings::CharsLen(kJueri);
 
   MockEngine engine;
@@ -4637,11 +4612,11 @@ TEST_F(SessionTest, MobilePartialPrediction) {
     segment = segments_wata.add_segment();
     constexpr absl::string_view kWata = "わた";
     segment->set_key(kWata);
-    Segment::Candidate *cand1 = AddCandidate(kWata, "綿", segment);
-    cand1->attributes = Segment::Candidate::PARTIALLY_KEY_CONSUMED;
+    converter::Candidate *cand1 = AddCandidate(kWata, "綿", segment);
+    cand1->attributes = converter::Candidate::PARTIALLY_KEY_CONSUMED;
     cand1->consumed_key_size = strings::CharsLen(kWata);
-    Segment::Candidate *cand2 = AddCandidate(kWata, kWata, segment);
-    cand2->attributes = Segment::Candidate::PARTIALLY_KEY_CONSUMED;
+    converter::Candidate *cand2 = AddCandidate(kWata, kWata, segment);
+    cand2->attributes = converter::Candidate::PARTIALLY_KEY_CONSUMED;
     cand2->consumed_key_size = strings::CharsLen(kWata);
   }
 
@@ -4651,13 +4626,13 @@ TEST_F(SessionTest, MobilePartialPrediction) {
     segment = segments_watashino.add_segment();
     constexpr absl::string_view kWatashino = "わたしの";
     segment->set_key(kWatashino);
-    Segment::Candidate *cand1 = segment->add_candidate();
+    converter::Candidate *cand1 = segment->add_candidate();
     cand1->value = "私の";
-    cand1->attributes = Segment::Candidate::PARTIALLY_KEY_CONSUMED;
+    cand1->attributes = converter::Candidate::PARTIALLY_KEY_CONSUMED;
     cand1->consumed_key_size = strings::CharsLen(kWatashino);
-    Segment::Candidate *cand2 = segment->add_candidate();
+    converter::Candidate *cand2 = segment->add_candidate();
     cand2->value = kWatashino;
-    cand2->attributes = Segment::Candidate::PARTIALLY_KEY_CONSUMED;
+    cand2->attributes = converter::Candidate::PARTIALLY_KEY_CONSUMED;
     cand2->consumed_key_size = strings::CharsLen(kWatashino);
   }
 
@@ -4667,10 +4642,10 @@ TEST_F(SessionTest, MobilePartialPrediction) {
     segment = segments_shino.add_segment();
     constexpr absl::string_view kShino = "しの";
     segment->set_key(kShino);
-    Segment::Candidate *candidate;
+    converter::Candidate *candidate;
     candidate = AddCandidate("しのみや", "四ノ宮", segment);
     candidate->content_key = segment->key();
-    candidate->attributes = Segment::Candidate::PARTIALLY_KEY_CONSUMED;
+    candidate->attributes = converter::Candidate::PARTIALLY_KEY_CONSUMED;
     candidate->consumed_key_size = strings::CharsLen(kShino);
     candidate = AddCandidate(kShino, "shino", segment);
   }
@@ -5632,65 +5607,67 @@ TEST_F(SessionTest, IsFullWidthInsertSpace) {
     // Default config -- follow to the current mode.
     config.set_space_character_form(config::Config::FUNDAMENTAL_INPUT_MODE);
     Session session(engine);
+    SessionTestPeer session_peer(session);
     session.SetConfig(config);
     InitSessionToPrecomposition(&session);
 
     // Hiragana
     session.InputModeHiragana(&command);
-    EXPECT_TRUE(session.IsFullWidthInsertSpace(empty_input));
+    EXPECT_TRUE(session_peer.IsFullWidthInsertSpace(empty_input));
     // Full-Katakana
     command.Clear();
     session.InputModeFullKatakana(&command);
-    EXPECT_TRUE(session.IsFullWidthInsertSpace(empty_input));
+    EXPECT_TRUE(session_peer.IsFullWidthInsertSpace(empty_input));
     // Half-Katakana
     command.Clear();
     session.InputModeHalfKatakana(&command);
-    EXPECT_FALSE(session.IsFullWidthInsertSpace(empty_input));
+    EXPECT_FALSE(session_peer.IsFullWidthInsertSpace(empty_input));
     // Full-ASCII
     command.Clear();
     session.InputModeFullASCII(&command);
-    EXPECT_TRUE(session.IsFullWidthInsertSpace(empty_input));
+    EXPECT_TRUE(session_peer.IsFullWidthInsertSpace(empty_input));
     // Half-ASCII
     command.Clear();
     session.InputModeHalfASCII(&command);
-    EXPECT_FALSE(session.IsFullWidthInsertSpace(empty_input));
+    EXPECT_FALSE(session_peer.IsFullWidthInsertSpace(empty_input));
     // Direct
     command.Clear();
     session.IMEOff(&command);
-    EXPECT_FALSE(session.IsFullWidthInsertSpace(empty_input));
+    EXPECT_FALSE(session_peer.IsFullWidthInsertSpace(empty_input));
   }
 
   {
     // Set config to 'half' -- all mode has to emit half-width space.
     config.set_space_character_form(config::Config::FUNDAMENTAL_HALF_WIDTH);
     Session session(engine);
+    SessionTestPeer session_peer(session);
     session.SetConfig(config);
     InitSessionToPrecomposition(&session);
 
     // Hiragana
     command.Clear();
     session.InputModeHiragana(&command);
-    EXPECT_FALSE(session.IsFullWidthInsertSpace(empty_input));
+    EXPECT_FALSE(session_peer.IsFullWidthInsertSpace(empty_input));
     // Full-Katakana
     command.Clear();
     session.InputModeFullKatakana(&command);
-    EXPECT_FALSE(session.IsFullWidthInsertSpace(empty_input));
+    EXPECT_FALSE(session_peer.IsFullWidthInsertSpace(empty_input));
     // Half-Katakana
     command.Clear();
     session.InputModeHalfKatakana(&command);
-    EXPECT_FALSE(session.IsFullWidthInsertSpace(empty_input));
+    EXPECT_FALSE(session_peer.IsFullWidthInsertSpace(empty_input));
     // Full-ASCII
     command.Clear();
     session.InputModeFullASCII(&command);
-    EXPECT_FALSE(session.IsFullWidthInsertSpace(empty_input));
+    EXPECT_FALSE(session_peer.IsFullWidthInsertSpace(empty_input));
     // Half-ASCII
     command.Clear();
     session.InputModeHalfASCII(&command);
-    EXPECT_FALSE(session.IsFullWidthInsertSpace(empty_input));
+    EXPECT_FALSE(session_peer.IsFullWidthInsertSpace(empty_input));
     // Direct
     command.Clear();
     session.IMEOff(&command);
-    EXPECT_FALSE(session.IsFullWidthInsertSpace(empty_input));
+    EXPECT_FALSE(session_peer.IsFullWidthInsertSpace(empty_input));
   }
 
   {
@@ -5698,33 +5675,34 @@ TEST_F(SessionTest, IsFullWidthInsertSpace) {
     // full-width space.
     config.set_space_character_form(config::Config::FUNDAMENTAL_FULL_WIDTH);
     Session session(engine);
+    SessionTestPeer session_peer(session);
     session.SetConfig(config);
     InitSessionToPrecomposition(&session);
 
     // Hiragana
     command.Clear();
     session.InputModeHiragana(&command);
-    EXPECT_TRUE(session.IsFullWidthInsertSpace(empty_input));
+    EXPECT_TRUE(session_peer.IsFullWidthInsertSpace(empty_input));
     // Full-Katakana
     command.Clear();
     session.InputModeFullKatakana(&command);
-    EXPECT_TRUE(session.IsFullWidthInsertSpace(command.input()));
+    EXPECT_TRUE(session_peer.IsFullWidthInsertSpace(command.input()));
     // Half-Katakana
     command.Clear();
     session.InputModeHalfKatakana(&command);
-    EXPECT_TRUE(session.IsFullWidthInsertSpace(empty_input));
+    EXPECT_TRUE(session_peer.IsFullWidthInsertSpace(empty_input));
     // Full-ASCII
     command.Clear();
     session.InputModeFullASCII(&command);
-    EXPECT_TRUE(session.IsFullWidthInsertSpace(empty_input));
+    EXPECT_TRUE(session_peer.IsFullWidthInsertSpace(empty_input));
     // Half-ASCII
     command.Clear();
     session.InputModeHalfASCII(&command);
-    EXPECT_TRUE(session.IsFullWidthInsertSpace(empty_input));
+    EXPECT_TRUE(session_peer.IsFullWidthInsertSpace(empty_input));
     // Direct
     command.Clear();
     session.IMEOff(&command);
-    EXPECT_FALSE(session.IsFullWidthInsertSpace(empty_input));
+    EXPECT_FALSE(session_peer.IsFullWidthInsertSpace(empty_input));
   }
 
   // When |input| has |input.key().mode()| field,
@@ -5734,6 +5712,7 @@ TEST_F(SessionTest, IsFullWidthInsertSpace) {
     // Default config -- follow to the current mode.
     config.set_space_character_form(config::Config::FUNDAMENTAL_INPUT_MODE);
     Session session(engine);
+    SessionTestPeer session_peer(session);
     session.SetConfig(config);
     InitSessionToPrecomposition(&session);
 
@@ -5744,27 +5723,27 @@ TEST_F(SessionTest, IsFullWidthInsertSpace) {
     // Hiragana
     commands::Command command;
     session.InputModeHiragana(&command);
-    EXPECT_FALSE(session.IsFullWidthInsertSpace(input));
+    EXPECT_FALSE(session_peer.IsFullWidthInsertSpace(input));
     // Full-Katakana
     command.Clear();
     session.InputModeFullKatakana(&command);
-    EXPECT_FALSE(session.IsFullWidthInsertSpace(input));
+    EXPECT_FALSE(session_peer.IsFullWidthInsertSpace(input));
     // Half-Katakana
     command.Clear();
     session.InputModeHalfKatakana(&command);
-    EXPECT_FALSE(session.IsFullWidthInsertSpace(input));
+    EXPECT_FALSE(session_peer.IsFullWidthInsertSpace(input));
     // Full-ASCII
     command.Clear();
     session.InputModeFullASCII(&command);
-    EXPECT_FALSE(session.IsFullWidthInsertSpace(input));
+    EXPECT_FALSE(session_peer.IsFullWidthInsertSpace(input));
     // Half-ASCII
     command.Clear();
     session.InputModeHalfASCII(&command);
-    EXPECT_FALSE(session.IsFullWidthInsertSpace(input));
+    EXPECT_FALSE(session_peer.IsFullWidthInsertSpace(input));
     // Direct
     command.Clear();
     session.IMEOff(&command);
-    EXPECT_FALSE(session.IsFullWidthInsertSpace(input));
+    EXPECT_FALSE(session_peer.IsFullWidthInsertSpace(input));
 
     // Use FULL_ASCII for the new input mode
     input.mutable_key()->set_mode(commands::FULL_ASCII);
@@ -5772,27 +5751,27 @@ TEST_F(SessionTest, IsFullWidthInsertSpace) {
     // Hiragana
     command.Clear();
     session.InputModeHiragana(&command);
-    EXPECT_TRUE(session.IsFullWidthInsertSpace(input));
+    EXPECT_TRUE(session_peer.IsFullWidthInsertSpace(input));
     // Full-Katakana
     command.Clear();
     session.InputModeFullKatakana(&command);
-    EXPECT_TRUE(session.IsFullWidthInsertSpace(input));
+    EXPECT_TRUE(session_peer.IsFullWidthInsertSpace(input));
     // Half-Katakana
     command.Clear();
     session.InputModeHalfKatakana(&command);
-    EXPECT_TRUE(session.IsFullWidthInsertSpace(input));
+    EXPECT_TRUE(session_peer.IsFullWidthInsertSpace(input));
     // Full-ASCII
     command.Clear();
     session.InputModeFullASCII(&command);
-    EXPECT_TRUE(session.IsFullWidthInsertSpace(input));
+    EXPECT_TRUE(session_peer.IsFullWidthInsertSpace(input));
     // Half-ASCII
     command.Clear();
     session.InputModeHalfASCII(&command);
-    EXPECT_TRUE(session.IsFullWidthInsertSpace(input));
+    EXPECT_TRUE(session_peer.IsFullWidthInsertSpace(input));
     // Direct
     command.Clear();
     session.IMEOff(&command);
-    EXPECT_FALSE(session.IsFullWidthInsertSpace(input));
+    EXPECT_FALSE(session_peer.IsFullWidthInsertSpace(input));
   }
 }
 
@@ -5881,6 +5860,8 @@ TEST_F(SessionTest, Issue1975771) {
   EXPECT_TRUE(session.InsertCharacter(&command));
 
   // Click the first candidate.
+  EXPECT_CALL(*converter, PrependCandidates(_, _, _))
+      .WillRepeatedly(SetArgPointee<2>(segments));
   SetSendCommandCommand(commands::SessionCommand::SELECT_CANDIDATE, &command);
   command.mutable_input()->mutable_command()->set_id(0);
   EXPECT_TRUE(session.SendCommand(&command));
@@ -5913,8 +5894,8 @@ TEST_F(SessionTest, Issue2029466) {
   // <tab>
   Segments segments;
   SetAiueo(&segments);
-  EXPECT_CALL(*converter, StartPrediction(_, _))
-      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+  EXPECT_CALL(*converter, StartPredictionWithPreviousSuggestion(_, _, _))
+      .WillOnce(DoAll(SetArgPointee<2>(segments), Return(true)));
   command.Clear();
   EXPECT_TRUE(session.PredictAndConvert(&command));
 
@@ -5951,7 +5932,7 @@ TEST_F(SessionTest, Issue2034943) {
     Segments segments;
     Segment *segment = segments.add_segment();
     segment->set_key("mozu");
-    Segment::Candidate *candidate;
+    converter::Candidate *candidate;
     candidate = segment->add_candidate();
     candidate->value = "MOZU";
     const ConversionRequest request = CreateConversionRequest(session);
@@ -6014,12 +5995,12 @@ TEST_F(SessionTest, Issue2066906) {
   Segments segments;
   Segment *segment = segments.add_segment();
   segment->set_key("a");
-  Segment::Candidate *candidate = segment->add_candidate();
+  converter::Candidate *candidate = segment->add_candidate();
   candidate->value = "abc";
   candidate = segment->add_candidate();
   candidate->value = "abcdef";
-  EXPECT_CALL(*converter, StartPrediction(_, _))
-      .WillOnce(DoAll(SetArgPointee<1>(segments), Return(true)));
+  EXPECT_CALL(*converter, StartPredictionWithPreviousSuggestion(_, _, _))
+      .WillRepeatedly(DoAll(SetArgPointee<2>(segments), Return(true)));
 
   // Prediction with "a"
   commands::Command command;
@@ -6277,7 +6258,7 @@ TEST_F(SessionTest, Issue2223755) {
       Segment *segment;
       segment = segments.add_segment();
       segment->set_key("あ い");
-      Segment::Candidate *candidate;
+      converter::Candidate *candidate;
       candidate = segment->add_candidate();
       candidate->value = "あ い";
       const ConversionRequest request = CreateConversionRequest(session);
@@ -6421,7 +6402,7 @@ TEST_F(SessionTest, Issue2379374) {
   Segments segments;
   {  // Set mock conversion.
     Segment *segment;
-    Segment::Candidate *candidate;
+    converter::Candidate *candidate;
 
     segment = segments.add_segment();
     segment->set_key("あ");
@@ -6967,7 +6948,7 @@ TEST_F(SessionTest, ClearUndoOnResetContext) {
     SetAiueo(&segments);
     // Don't use FillT13Ns(). It makes platform dependent segments.
     // TODO(hsumita): Makes FillT13Ns() independent from platforms.
-    Segment::Candidate *candidate;
+    converter::Candidate *candidate;
     candidate = segments.mutable_segment(0)->add_candidate();
     candidate->value = "aiueo";
     candidate = segments.mutable_segment(0)->add_candidate();
@@ -7719,7 +7700,7 @@ TEST_F(SessionTest, CommitCandidateAt2ndOf3Segments) {
   {  // Segments as conversion result.
     Segments segments;
     Segment *segment;
-    Segment::Candidate *candidate;
+    converter::Candidate *candidate;
 
     segment = segments.add_segment();
     segment->set_key("ねこの");
@@ -7751,7 +7732,7 @@ TEST_F(SessionTest, CommitCandidateAt2ndOf3Segments) {
   {  // Segments as result of CommitHeadToFocusedSegments
     Segments segments;
     Segment *segment;
-    Segment::Candidate *candidate;
+    converter::Candidate *candidate;
 
     segment = segments.add_segment();
     segment->set_key("ぬいた");
@@ -7783,7 +7764,7 @@ TEST_F(SessionTest, CommitCandidateAt3rdOf3Segments) {
   {  // Segments as conversion result.
     Segments segments;
     Segment *segment;
-    Segment::Candidate *candidate;
+    converter::Candidate *candidate;
 
     segment = segments.add_segment();
     segment->set_key("ねこの");
@@ -8749,7 +8730,7 @@ TEST_F(SessionTest, UndoKeyAction) {
     Segments segments;
     InsertCharacterChars("aiueo", &session, &command);
     SetAiueo(&segments);
-    Segment::Candidate *candidate;
+    converter::Candidate *candidate;
     candidate = segments.mutable_segment(0)->add_candidate();
     candidate->value = "aiueo";
     candidate = segments.mutable_segment(0)->add_candidate();
@@ -9861,8 +9842,8 @@ TEST_F(SessionTest, DeleteHistory) {
   Segment *segment = segments.add_segment();
   segment->set_key("delete");
   segment->add_candidate()->value = "DeleteHistory";
-  EXPECT_CALL(*converter, StartPrediction(_, _))
-      .WillRepeatedly(DoAll(SetArgPointee<1>(segments), Return(true)));
+  EXPECT_CALL(*converter, StartPredictionWithPreviousSuggestion(_, _, _))
+      .WillRepeatedly(DoAll(SetArgPointee<2>(segments), Return(true)));
 
   // Type "del". Preedit = "でｌ".
   commands::Command command;
@@ -10173,12 +10154,13 @@ TEST_F(SessionTest, SetConfig) {
   MockEngine engine;
   std::shared_ptr<MockConverter> converter = CreateEngineConverterMock(&engine);
   Session session(engine);
-  session.PushUndoContext();
+  SessionTestPeer session_peer(session);
+  session_peer.PushUndoContext();
   session.SetConfig(config);
 
-  EXPECT_EQ(config.get(), &session.context_->GetConfig());
+  EXPECT_EQ(config.get(), &session_peer.context_()->GetConfig());
   // SetConfig() resets undo context.
-  EXPECT_TRUE(session.undo_contexts_.empty());
+  EXPECT_TRUE(session_peer.undo_contexts_().empty());
 }
 
 TEST_F(SessionTest, ClearCompositionByBackspace) {

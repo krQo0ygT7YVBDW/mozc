@@ -34,7 +34,6 @@ load("@com_google_protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
 load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
 load(
     "//:build_defs.bzl",
-    "mozc_cc_binary",
     "mozc_cc_library",
     "mozc_cc_test",
     "mozc_select",
@@ -69,6 +68,7 @@ mozc_cc_library(
         "//base:thread",
         "//base:util",
         "//base:vlog",
+        "//base/strings:zstring_view",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
@@ -116,7 +116,6 @@ mozc_cc_library(
         "//base:util",
         "//base:version",
         "//base:vlog",
-        "//testing:friend_test",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
@@ -131,19 +130,6 @@ mozc_cc_library(
             "@com_microsoft_wil//:wil",
         ],
     ),
-)
-
-mozc_cc_binary(
-    name = "ipc_path_manager_main",
-    srcs = ["ipc_path_manager_main.cc"],
-    deps = [
-        ":ipc_path_manager",
-        "//base:init_mozc_buildtool",
-        "@com_google_absl//absl/flags:flag",
-        "@com_google_absl//absl/log",
-        "@com_google_absl//absl/log:check",
-        "@com_google_absl//absl/time",
-    ],
 )
 
 mozc_cc_test(
@@ -162,6 +148,7 @@ mozc_cc_test(
         "//base:version",
         "//testing:gunit_main",
         "//testing:mozctest",
+        "//testing:test_peer",
         "@com_google_absl//absl/time",
     ],
 )
@@ -178,6 +165,7 @@ mozc_cc_library(
     deps = [
         ":ipc",
         "//base:version",
+        "//base/strings:zstring_view",
         "@com_google_absl//absl/time",
     ],
 )
@@ -189,6 +177,7 @@ mozc_cc_library(
     visibility = ["//renderer:__subpackages__"],
     deps = [
         ":ipc",
+        "//base/strings:zstring_view",
         "@com_google_absl//absl/log:check",
     ],
 )
@@ -204,22 +193,6 @@ mozc_cc_test(
         "//base:thread",
         "//testing:gunit_main",
         "//testing:mozctest",
-        "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/time",
-    ],
-)
-
-mozc_cc_binary(
-    name = "ipc_main",
-    srcs = ["ipc_main.cc"],
-    copts = ["$(STACK_FRAME_UNLIMITED)"],  # ipc_main.cc
-    deps = [
-        ":ipc",
-        "//base:init_mozc_buildtool",
-        "//base:thread",
-        "@com_google_absl//absl/flags:flag",
-        "@com_google_absl//absl/log",
-        "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
     ],
@@ -249,19 +222,6 @@ mozc_cc_library(
             "//base/win32:wide_char",
         ],
     ),
-)
-
-mozc_cc_binary(
-    name = "named_event_main",
-    srcs = ["named_event_main.cc"],
-    deps = [
-        ":named_event",
-        "//base:init_mozc_buildtool",
-        "@com_google_absl//absl/flags:flag",
-        "@com_google_absl//absl/log",
-        "@com_google_absl//absl/log:check",
-        "@com_google_absl//absl/time",
-    ],
 )
 
 mozc_cc_test(
@@ -310,6 +270,7 @@ mozc_cc_library(
     textual_hdrs = ["ipc.h"],
     deps = [
         "//base:thread",
+        "//base/strings:zstring_view",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",

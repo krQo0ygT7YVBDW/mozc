@@ -32,7 +32,6 @@
 
 #include <memory>
 
-#include "absl/random/random.h"
 #include "absl/strings/string_view.h"
 #include "converter/segments.h"
 #include "data_manager/data_manager.h"
@@ -59,7 +58,6 @@ class EmoticonRewriter : public RewriterInterface {
   bool RewriteCandidate(Segments *segments) const;
 
   SerializedDictionary dic_;
-  mutable absl::BitGen bitgen_;
 };
 
 }  // namespace mozc

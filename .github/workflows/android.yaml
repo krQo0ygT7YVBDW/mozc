@@ -21,7 +21,7 @@ jobs:
       - name: checkout
         uses: actions/checkout@v4
         with:
-          submodules: 'recursive'
+          submodules: recursive
 
       - name: setup
         run: |
@@ -52,15 +52,15 @@ jobs:
           if-no-files-found: warn
 
   build_on_mac:
-    # https://github.com/actions/runner-images/blob/main/images/macos/macos-14-arm64-Readme.md
-    runs-on: macos-14
+    # https://github.com/actions/runner-images/blob/main/images/macos/macos-15-arm64-Readme.md
+    runs-on: macos-15
     timeout-minutes: 60
 
     steps:
       - name: checkout
         uses: actions/checkout@v4
         with:
-          submodules: 'recursive'
+          submodules: recursive
 
       - name: Try to restore update_deps cache
         uses: actions/cache@v4

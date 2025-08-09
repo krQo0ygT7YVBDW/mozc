@@ -32,11 +32,11 @@
 
 #include <memory>
 #include <string>
-#include <utility>
 
 #include "absl/strings/string_view.h"
 #include "base/container/serialized_string_array.h"
 #include "config/config_handler.h"
+#include "converter/candidate.h"
 #include "converter/segments.h"
 #include "data_manager/testing/mock_data_manager.h"
 #include "dictionary/pos_matcher.h"
@@ -51,6 +51,7 @@
 #include "testing/gmock.h"
 #include "testing/gunit.h"
 #include "testing/mozctest.h"
+#include "testing/test_peer.h"
 
 namespace mozc {
 namespace {
@@ -63,7 +64,7 @@ using ::testing::SetArgPointee;
 void AddCandidate(const absl::string_view key, const absl::string_view value,
                   const absl::string_view content_key,
                   const absl::string_view content_value, Segment *segment) {
-  Segment::Candidate *candidate = segment->add_candidate();
+  converter::Candidate *candidate = segment->add_candidate();
   candidate->key = std::string(key);
   candidate->value = std::string(value);
   candidate->content_key = std::string(content_key);
@@ -72,16 +73,13 @@ void AddCandidate(const absl::string_view key, const absl::string_view value,
 
 }  // namespace
 
-class UsageRewriterPeer {
+class UsageRewriterTestPeer : public testing::TestPeer<UsageRewriter> {
  public:
-  UsageRewriterPeer(std::unique_ptr<UsageRewriter> rewriter) {
-    rewriter_ = std::move(rewriter);
-  }
+  explicit UsageRewriterTestPeer(UsageRewriter &rewriter)
+      : testing::TestPeer<UsageRewriter>(rewriter) {}
 
-  SerializedStringArray get_string_array() { return rewriter_->string_array_; }
-
- private:
-  std::unique_ptr<UsageRewriter> rewriter_;
+  PEER_STATIC_METHOD(GetKanjiPrefixAndOneHiragana);
+  PEER_VARIABLE(string_array_);
 };
 
 class TestDataManager : public testing::MockDataManager {
@@ -144,10 +142,10 @@ TEST_F(UsageRewriterTest, ConstructorTest) {
   std::unique_ptr<UsageRewriter> rewriter(
       CreateUsageRewriterWithTestDataManager());
 
-  UsageRewriterPeer rewriter_peer(std::move(rewriter));
-  EXPECT_TRUE(rewriter_peer.get_string_array().empty());
-  EXPECT_TRUE(SerializedStringArray::VerifyData(
-      rewriter_peer.get_string_array().data()));
+  UsageRewriterTestPeer rewriter_peer(*rewriter);
+  EXPECT_TRUE(rewriter_peer.string_array_().empty());
+  EXPECT_TRUE(
+      SerializedStringArray::VerifyData(rewriter_peer.string_array_().data()));
 }
 
 TEST_F(UsageRewriterTest, CapabilityTest) {
@@ -343,16 +341,21 @@ TEST_F(UsageRewriterTest, SameUsageTest) {
 }
 
 TEST_F(UsageRewriterTest, GetKanjiPrefixAndOneHiragana) {
-  EXPECT_EQ(UsageRewriter::GetKanjiPrefixAndOneHiragana("合わせる"), "合わ");
-  EXPECT_EQ(UsageRewriter::GetKanjiPrefixAndOneHiragana("合う"), "合う");
-  EXPECT_EQ(UsageRewriter::GetKanjiPrefixAndOneHiragana("合合わせる"),
+  EXPECT_EQ(UsageRewriterTestPeer::GetKanjiPrefixAndOneHiragana("合わせる"),
+            "合わ");
+  EXPECT_EQ(UsageRewriterTestPeer::GetKanjiPrefixAndOneHiragana("合う"),
+            "合う");
+  EXPECT_EQ(UsageRewriterTestPeer::GetKanjiPrefixAndOneHiragana("合合わせる"),
             "合合わ");
-  EXPECT_EQ(UsageRewriter::GetKanjiPrefixAndOneHiragana("合"), "");
-  EXPECT_EQ(UsageRewriter::GetKanjiPrefixAndOneHiragana("京都"), "");
-  EXPECT_EQ(UsageRewriter::GetKanjiPrefixAndOneHiragana("合合合わせる"), "");
-  EXPECT_EQ(UsageRewriter::GetKanjiPrefixAndOneHiragana("カタカナ"), "");
-  EXPECT_EQ(UsageRewriter::GetKanjiPrefixAndOneHiragana("abc"), "");
-  EXPECT_EQ(UsageRewriter::GetKanjiPrefixAndOneHiragana("あ合わせる"), "");
+  EXPECT_EQ(UsageRewriterTestPeer::GetKanjiPrefixAndOneHiragana("合"), "");
+  EXPECT_EQ(UsageRewriterTestPeer::GetKanjiPrefixAndOneHiragana("京都"), "");
+  EXPECT_EQ(UsageRewriterTestPeer::GetKanjiPrefixAndOneHiragana("合合合わせる"),
+            "");
+  EXPECT_EQ(UsageRewriterTestPeer::GetKanjiPrefixAndOneHiragana("カタカナ"),
+            "");
+  EXPECT_EQ(UsageRewriterTestPeer::GetKanjiPrefixAndOneHiragana("abc"), "");
+  EXPECT_EQ(UsageRewriterTestPeer::GetKanjiPrefixAndOneHiragana("あ合わせる"),
+            "");
 }
 
 TEST_F(UsageRewriterTest, CommentFromUserDictionary) {
@@ -384,12 +387,14 @@ TEST_F(UsageRewriterTest, CommentFromUserDictionary) {
   EXPECT_TRUE(rewriter->Rewrite(convreq, &segments));
 
   // Result of ("うま", "Horse"). No comment is expected.
-  const Segment::Candidate &cand0 = segments.conversion_segment(0).candidate(0);
+  const converter::Candidate &cand0 =
+      segments.conversion_segment(0).candidate(0);
   EXPECT_TRUE(cand0.usage_title.empty());
   EXPECT_TRUE(cand0.usage_description.empty());
 
   // Result of ("うま", "アルパカ"). Comment from user dictionary is expected.
-  const Segment::Candidate &cand1 = segments.conversion_segment(0).candidate(1);
+  const converter::Candidate &cand1 =
+      segments.conversion_segment(0).candidate(1);
   EXPECT_EQ(cand1.usage_title, "アルパカ");
   EXPECT_EQ(cand1.usage_description, "アルパカコメント");
 }

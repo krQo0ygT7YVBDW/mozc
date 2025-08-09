@@ -32,8 +32,8 @@
 #include <string>
 
 #include "absl/strings/string_view.h"
+#include "converter/candidate.h"
 #include "converter/segments.h"
-#include "data_manager/data_manager.h"
 #include "data_manager/testing/mock_data_manager.h"
 #include "protocol/commands.pb.h"
 #include "request/conversion_request.h"
@@ -44,7 +44,7 @@ namespace mozc {
 namespace {
 
 void AddCandidateWithValue(const absl::string_view value, Segment *segment) {
-  Segment::Candidate *candidate = segment->add_candidate();
+  converter::Candidate *candidate = segment->add_candidate();
   candidate->key = segment->key();
   candidate->content_key = segment->key();
   candidate->value = std::string(value);
@@ -54,7 +54,7 @@ void AddCandidateWithValue(const absl::string_view value, Segment *segment) {
 // Mock data manager that returns empty a11y description data.
 class NoDataMockDataManager : public testing::MockDataManager {
  public:
-  virtual void GetA11yDescriptionRewriterData(
+  void GetA11yDescriptionRewriterData(
       absl::string_view *token_array_data,
       absl::string_view *string_array_data) const override {
     *token_array_data = "";
@@ -228,6 +228,23 @@ TEST_F(A11yDescriptionRewriterTest, AddA11yDescriptionForAlphabetCharacters) {
             "ｘｙｚ。ゼンカクコモジ ｘｙｚ");
   EXPECT_EQ(segment->candidate(3).a11y_description,
             "Ｇｏｏｇｌｅ。ゼンカクオオモジ Ｇ。ゼンカクコモジ ｏｏｇｌｅ");
+}
+
+TEST_F(A11yDescriptionRewriterTest, CandidateValue) {
+  // Confirm the `value` is used rather than `content_value`.
+  Segments segments;
+  Segment *segment = segments.push_back_segment();
+  segment->set_key("あを");
+  converter::Candidate *candidate = segment->add_candidate();
+  candidate->key = "あを";
+  candidate->content_key = "あ";
+  candidate->value = "亜を";
+  candidate->content_value = "亜";
+
+  const ConversionRequest request;
+  EXPECT_TRUE(GetRewriter()->Rewrite(request, &segments));
+  EXPECT_EQ(segment->candidate(0).a11y_description,
+            "亜を。アネッタイ ノ ア。ヒラガナ を");
 }
 
 }  // namespace

@@ -42,13 +42,14 @@
 #include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/status/statusor.h"
-#include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "base/hash.h"
 #include "base/util.h"
 #include "base/vlog.h"
+#include "converter/attribute.h"
+#include "converter/candidate.h"
 #include "converter/segments.h"
 #include "data_manager/data_manager.h"
 #include "dictionary/pos_matcher.h"
@@ -88,7 +89,7 @@ absl::StatusOr<SuppressionFilter> SuppressionFilter::Create(
   return SuppressionFilter(*std::move(filter));
 }
 
-bool SuppressionFilter::Exists(const Segment::Candidate &cand) const {
+bool SuppressionFilter::Exists(const converter::Candidate &cand) const {
   // TODO(noriyukit): We should share key generation rule with
   // gen_collocation_suppression_data_main.cc.
   const uint64_t id =
@@ -149,7 +150,7 @@ bool ParseCompound(const absl::string_view value,
   // Check if the middle part matches |pattern|.
   const absl::string_view remaining_value =
       absl::ClippedSubstr(value, first_content->size());
-  if (!absl::StartsWith(remaining_value, pattern)) {
+  if (!remaining_value.starts_with(pattern)) {
     return false;
   }
 
@@ -197,14 +198,14 @@ void ResolveCompoundSegment(const absl::string_view top_value,
 // Generates strings for looking up collocation target for |cand|.
 // Returns true if |cand| is valid for collocation look up.
 // strings in |output| will be normalized for look up method.
-bool GenerateLookupTokens(const Segment::Candidate &cand,
-                          const Segment::Candidate &top_cand,
+bool GenerateLookupTokens(const converter::Candidate &cand,
+                          const converter::Candidate &top_cand,
                           SegmentLookupType type,
                           std::vector<std::string> *output) {
-  const std::string &content = cand.content_value;
-  const std::string &value = cand.value;
-  const std::string &top_content = top_cand.content_value;
-  const std::string &top_value = top_cand.value;
+  absl::string_view content = cand.content_value;
+  absl::string_view value = cand.value;
+  absl::string_view top_content = top_cand.content_value;
+  absl::string_view top_value = top_cand.value;
 
   const size_t top_content_len = Util::CharsLen(top_content);
   const size_t content_len = Util::CharsLen(content);
@@ -224,11 +225,11 @@ bool GenerateLookupTokens(const Segment::Candidate &cand,
   if (type == LEFT) {
     push_back_normalized_string(value);
   } else {
-    output->push_back(content);
+    output->push_back(std::string(content));
     // "舞って" workaround
     // V+"て" is often treated as one compound.
     static constexpr absl::string_view pattern = "て";
-    if (absl::EndsWith(content, pattern)) {
+    if (content.starts_with(pattern)) {
       push_back_normalized_string(
           Util::Utf8SubString(content, 0, content_len - 1));
     }
@@ -294,8 +295,7 @@ bool GenerateLookupTokens(const Segment::Candidate &cand,
   {
     static constexpr absl::string_view kSuffix = "いる";
     if (top_aux_value_len == 0 && aux_value_len == 2 &&
-        absl::EndsWith(top_value, kSuffix) &&
-        absl::EndsWith(aux_value, kSuffix)) {
+        top_value.ends_with(kSuffix) && aux_value.ends_with(kSuffix)) {
       if (type == RIGHT) {
         // "YYいる" in addition to "YY"
         push_back_normalized_string(value);
@@ -303,8 +303,7 @@ bool GenerateLookupTokens(const Segment::Candidate &cand,
       return true;
     }
     if (aux_value_len == 0 && top_aux_value_len == 2 &&
-        absl::EndsWith(value, kSuffix) &&
-        absl::EndsWith(top_aux_value, kSuffix)) {
+        value.ends_with(kSuffix) && top_aux_value.ends_with(kSuffix)) {
       if (type == RIGHT) {
         // "YY" in addition to "YYいる"
         push_back_normalized_string(
@@ -318,8 +317,7 @@ bool GenerateLookupTokens(const Segment::Candidate &cand,
   {
     static constexpr absl::string_view kSuffix = "せる";
     if (top_aux_value_len == 0 && aux_value_len == 2 &&
-        absl::EndsWith(top_value, kSuffix) &&
-        absl::EndsWith(aux_value, kSuffix)) {
+        top_value.ends_with(kSuffix) && aux_value.ends_with(kSuffix)) {
       if (type == RIGHT) {
         // "YYせる" in addition to "YY"
         push_back_normalized_string(value);
@@ -327,8 +325,7 @@ bool GenerateLookupTokens(const Segment::Candidate &cand,
       return true;
     }
     if (aux_value_len == 0 && top_aux_value_len == 2 &&
-        absl::EndsWith(value, kSuffix) &&
-        absl::EndsWith(top_aux_value, kSuffix)) {
+        value.ends_with(kSuffix) && top_aux_value.ends_with(kSuffix)) {
       if (type == RIGHT) {
         // "YY" in addition to "YYせる"
         push_back_normalized_string(
@@ -344,7 +341,7 @@ bool GenerateLookupTokens(const Segment::Candidate &cand,
   // in "<XX|する>", XX must be single script type
   {
     static constexpr absl::string_view kSuffix = "する";
-    if (aux_value_len == 2 && absl::EndsWith(aux_value, kSuffix)) {
+    if (aux_value_len == 2 && aux_value.ends_with(kSuffix)) {
       if (content_script_type != Util::KATAKANA &&
           content_script_type != Util::HIRAGANA &&
           content_script_type != Util::KANJI &&
@@ -364,7 +361,7 @@ bool GenerateLookupTokens(const Segment::Candidate &cand,
   // "まとめる", "衰える"
   {
     static constexpr absl::string_view kSuffix = "る";
-    if (aux_value_len == 0 && absl::EndsWith(value, kSuffix)) {
+    if (aux_value_len == 0 && value.ends_with(kSuffix)) {
       if (type == RIGHT) {
         // "YY" in addition to "YYる"
         push_back_normalized_string(
@@ -377,7 +374,7 @@ bool GenerateLookupTokens(const Segment::Candidate &cand,
   // "<XXす>" can be rewrote using "XXする"
   {
     static constexpr absl::string_view kSuffix = "す";
-    if (absl::EndsWith(value, kSuffix) &&
+    if (value.ends_with(kSuffix) &&
         Util::IsScriptType(Util::Utf8SubString(value, 0, value_len - 1),
                            Util::KANJI)) {
       if (type == RIGHT) {
@@ -393,8 +390,8 @@ bool GenerateLookupTokens(const Segment::Candidate &cand,
   {
     static constexpr absl::string_view kShi = "し";
     static constexpr absl::string_view kTa = "た";
-    if (absl::EndsWith(content, kShi) && aux_value == kTa &&
-        absl::EndsWith(top_content, kShi) && top_aux_value == kTa) {
+    if (content.ends_with(kShi) && aux_value == kTa &&
+        top_content.ends_with(kShi) && top_aux_value == kTa) {
       if (type == RIGHT) {
         const absl::string_view val =
             Util::Utf8SubString(content, 0, content_len - 1);
@@ -444,8 +441,8 @@ bool GenerateLookupTokens(const Segment::Candidate &cand,
 }
 
 // Just a wrapper of IsNaturalContent for debug.
-bool VerifyNaturalContent(const Segment::Candidate &cand,
-                          const Segment::Candidate &top_cand,
+bool VerifyNaturalContent(const converter::Candidate &cand,
+                          const converter::Candidate &top_cand,
                           SegmentLookupType type) {
   std::vector<std::string> nexts;
   return GenerateLookupTokens(cand, top_cand, RIGHT, &nexts);
@@ -495,7 +492,7 @@ bool CollocationRewriter::RewriteCollocation(Segments *segments) const {
       segs_changed[i] = true;
     }
 
-    const Segment::Candidate &cand = segments->segment(i).candidate(0);
+    const converter::Candidate &cand = segments->segment(i).candidate(0);
     if (i >= 2 &&
         // Cross over only adverbs
         // Segment is adverb if;
@@ -552,7 +549,7 @@ bool CollocationRewriter::Rewrite(const ConversionRequest &request,
   return RewriteCollocation(segments);
 }
 
-bool CollocationRewriter::IsName(const Segment::Candidate &cand) const {
+bool CollocationRewriter::IsName(const converter::Candidate &cand) const {
   const bool ret = (cand.lid == last_name_id_ || cand.lid == first_name_id_);
   if (ret) {
     MOZC_VLOG(3) << cand.value << " is name sagment";
@@ -561,7 +558,7 @@ bool CollocationRewriter::IsName(const Segment::Candidate &cand) const {
 }
 
 bool CollocationRewriter::RewriteFromPrevSegment(
-    const Segment::Candidate &prev_cand, Segment *seg) const {
+    const converter::Candidate &prev_cand, Segment *seg) const {
   std::string prev;
   CollocationUtil::GetNormalizedScript(prev_cand.value, true, &prev);
 
@@ -585,7 +582,7 @@ bool CollocationRewriter::RewriteFromPrevSegment(
       continue;
     }
 
-    for (const std::string &cur : curs) {
+    for (absl::string_view cur : curs) {
       if (collocation_filter_.Exists(prev, cur)) {
         if (i != 0) {
           MOZC_VLOG(3) << prev << cur << " " << seg->candidate(0).value << "->"
@@ -593,7 +590,7 @@ bool CollocationRewriter::RewriteFromPrevSegment(
         }
         seg->move_candidate(i, 0);
         seg->mutable_candidate(0)->attributes |=
-            Segment::Candidate::CONTEXT_SENSITIVE;
+            converter::Attribute::CONTEXT_SENSITIVE;
         return true;
       }
     }
@@ -644,7 +641,7 @@ bool CollocationRewriter::RewriteUsingNextSegment(Segment *next_seg,
       continue;
     }
 
-    for (const std::string &cur : curs) {
+    for (absl::string_view cur : curs) {
       for (size_t j = 0; j < j_max; ++j) {
         if (next_seg->candidate(j).cost >
             next_seg->candidate(0).cost + kMaxCostDiff) {
@@ -654,17 +651,17 @@ bool CollocationRewriter::RewriteUsingNextSegment(Segment *next_seg,
           continue;
         }
 
-        for (const std::string &next : nexts[j]) {
+        for (absl::string_view next : nexts[j]) {
           if (collocation_filter_.Exists(cur, next)) {
             DCHECK(VerifyNaturalContent(next_seg->candidate(j),
                                         next_seg->candidate(0), RIGHT))
                 << "IsNaturalContent() should not fail here.";
             seg->move_candidate(i, 0);
             seg->mutable_candidate(0)->attributes |=
-                Segment::Candidate::CONTEXT_SENSITIVE;
+                converter::Attribute::CONTEXT_SENSITIVE;
             next_seg->move_candidate(j, 0);
             next_seg->mutable_candidate(0)->attributes |=
-                Segment::Candidate::CONTEXT_SENSITIVE;
+                converter::Attribute::CONTEXT_SENSITIVE;
             return true;
           }
         }

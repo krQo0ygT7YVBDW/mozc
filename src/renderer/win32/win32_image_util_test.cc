@@ -48,6 +48,7 @@
 #include "absl/strings/str_cat.h"
 #include "base/file_stream.h"
 #include "base/file_util.h"
+#include "base/protobuf/message.h"
 #include "base/protobuf/text_format.h"
 #include "base/win32/wide_char.h"
 #include "base/win32/win_font_test_helper.h"
@@ -132,9 +133,7 @@ class BalloonImageTest : public ::testing::Test,
     bitmap.Save(filename.c_str(), &clsid_png_);
 
     OutputFileStream os(absl::StrCat(WideToUtf8(filename), ".textproto"));
-    std::string textproto;
-    mozc::protobuf::TextFormat::PrintToString(spec, &textproto);
-    os << textproto;
+    os << ::mozc::protobuf::Utf8Format(spec);
   }
 
   static void BalloonInfoToTextProto(const BalloonImageInfo &info,
@@ -309,7 +308,7 @@ INSTANTIATE_TEST_CASE_P(BalloonImageParameters, BalloonImageTest,
 
 TEST_P(BalloonImageTest, TestImpl) {
   const std::string &expected_image_path = mozc::testing::GetSourceFileOrDie(
-      {MOZC_DICT_DIR_COMPONENTS, "test", "renderer", "win32", GetParam()});
+      {"data", "test", "renderer", "win32", GetParam()});
   const std::string textproto_path = expected_image_path + ".textproto";
   ASSERT_OK(FileUtil::FileExists(textproto_path))
       << "Manifest file is not found: " << textproto_path;

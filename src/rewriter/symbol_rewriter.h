@@ -37,16 +37,14 @@
 
 #include "absl/strings/string_view.h"
 #include "data_manager/serialized_dictionary.h"
+#include "converter/segments.h"
 #include "rewriter/rewriter_interface.h"
-#include "testing/friend_test.h"
 
 namespace mozc {
 
 class ConversionRequest;
 class ConverterInterface;
 class DataManager;
-class Segment;
-class Segments;
 
 class SymbolRewriter : public RewriterInterface {
  public:
@@ -56,18 +54,15 @@ class SymbolRewriter : public RewriterInterface {
   int capability(const ConversionRequest &request) const override;
 
   std::optional<RewriterInterface::ResizeSegmentsRequest>
-  CheckResizeSegmentsRequest(const ConversionRequest &request,
-                             const Segments &segments) const override;
+  CheckResizeSegmentsRequest(
+      const ConversionRequest &request,
+      const converter::Segments &segments) const override;
 
   bool Rewrite(const ConversionRequest &request,
-               Segments *segments) const override;
+               converter::Segments *segments) const override;
 
  private:
-  FRIEND_TEST(SymbolRewriterTest, TriggerRewriteEntireTest);
-  FRIEND_TEST(SymbolRewriterTest, TriggerRewriteEachTest);
-  FRIEND_TEST(SymbolRewriterTest, TriggerRewriteDescriptionTest);
-  FRIEND_TEST(SymbolRewriterTest, SplitDescriptionTest);
-  FRIEND_TEST(SymbolRewriterTest, ResizeSegmentFailureIsNotFatal);
+  friend class SymbolRewriterTestPeer;
 
   // Some characters may have different description for full/half width forms.
   // Here we just change the description in this function.
@@ -99,11 +94,11 @@ class SymbolRewriter : public RewriterInterface {
 
   // Insert symbols using connected all segments.
   bool RewriteEntireCandidate(const ConversionRequest &request,
-                              Segments *segments) const;
+                              converter::Segments *segments) const;
 
   // Insert symbols using single segment.
   bool RewriteEachCandidate(const ConversionRequest &request,
-                            Segments *segments) const;
+                            converter::Segments *segments) const;
 
   std::unique_ptr<SerializedDictionary> dictionary_;
 };

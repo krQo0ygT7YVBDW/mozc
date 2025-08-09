@@ -29,12 +29,18 @@
 
 #include "request/conversion_request.h"
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <utility>
 
+#include "absl/strings/str_cat.h"
+#include "absl/strings/string_view.h"
 #include "composer/composer.h"
 #include "composer/table.h"
+#include "converter/candidate.h"
+#include "converter/inner_segment.h"
+#include "prediction/result.h"
 #include "protocol/commands.pb.h"
 #include "protocol/config.pb.h"
 #include "testing/gunit.h"
@@ -136,6 +142,18 @@ TEST(ConversionRequestTest, SetKeyTest) {
                                               .SetKey("foo")
                                               .Build();
   EXPECT_EQ("foo", conversion_request2.key());
+
+  ConversionRequest conversion_request3 =
+      ConversionRequestBuilder()
+          .SetConversionRequestView(conversion_request2)
+          .Build();
+  EXPECT_EQ("foo", conversion_request3.key());
+}
+
+TEST(ConversionRequestTest, IsZeroQuerySuggestionTest) {
+  EXPECT_TRUE(ConversionRequestBuilder().Build().IsZeroQuerySuggestion());
+  EXPECT_FALSE(
+      ConversionRequestBuilder().SetKey("key").Build().IsZeroQuerySuggestion());
 }
 
 TEST(ConversionRequestTest, IncognitoModeTest) {

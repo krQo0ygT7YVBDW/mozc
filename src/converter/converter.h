@@ -35,10 +35,14 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
+#include <vector>
 
+#include "absl/log/check.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
+#include "converter/candidate.h"
 #include "converter/converter_interface.h"
 #include "converter/history_reconstructor.h"
 #include "converter/immutable_converter_interface.h"
@@ -48,11 +52,12 @@
 #include "dictionary/pos_matcher.h"
 #include "engine/modules.h"
 #include "prediction/predictor_interface.h"
+#include "prediction/result.h"
 #include "request/conversion_request.h"
 #include "rewriter/rewriter_interface.h"
-#include "testing/friend_test.h"
 
 namespace mozc {
+namespace converter {
 
 class Converter final : public ConverterInterface {
  public:
@@ -86,6 +91,15 @@ class Converter final : public ConverterInterface {
   [[nodiscard]]
   bool StartPrediction(const ConversionRequest &request,
                        Segments *segments) const override;
+
+  [[nodiscard]]
+  bool StartPredictionWithPreviousSuggestion(const ConversionRequest &request,
+                                             const Segment &previous_segment,
+                                             Segments *segments) const override;
+
+  void PrependCandidates(const ConversionRequest &request,
+                         const Segment &segment,
+                         Segments *segments) const override;
 
   void FinishConversion(const ConversionRequest &request,
                         Segments *segments) const override;
@@ -159,20 +173,24 @@ class Converter final : public ConverterInterface {
     return *modules_;
   }
 
+  // Utility method to make committed results for Predictor::Finish().
+  static std::vector<prediction::Result> MakeLearningResults(
+      const Segments &segments);
+
+  // Utility method to make history result passed to ConversionRequest.
+  static prediction::Result MakeHistoryResult(const Segments &segments);
+
  private:
   Converter() = default;
 
-  FRIEND_TEST(ConverterTest, CompletePosIds);
-  FRIEND_TEST(ConverterTest, DefaultPredictor);
-  FRIEND_TEST(ConverterTest, MaybeSetConsumedKeySizeToSegment);
-  FRIEND_TEST(ConverterTest, PredictSetKey);
+  friend class ConverterTestPeer;
 
   // Complete Left id/Right id if they are not defined.
   // Some users don't push conversion button but directly
   // input hiragana sequence only with composition mode. Converter
   // cannot know which POS ids should be used for these directly-
   // input strings. This function estimates IDs from value heuristically.
-  void CompletePosIds(Segment::Candidate *candidate) const;
+  void CompletePosIds(Candidate *candidate) const;
 
   bool CommitSegmentValueInternal(Segments *segments, size_t segment_index,
                                   int candidate_index,
@@ -181,7 +199,7 @@ class Converter final : public ConverterInterface {
   // Sets all the candidates' attribute PARTIALLY_KEY_CONSUMED
   // and consumed_key_size if the attribute is not set.
   static void MaybeSetConsumedKeySizeToCandidate(size_t consumed_key_size,
-                                                 Segment::Candidate *candidate);
+                                                 Candidate *candidate);
 
   // Sets all the candidates' attribute PARTIALLY_KEY_CONSUMED
   // and consumed_key_size if the attribute is not set.
@@ -202,6 +220,18 @@ class Converter final : public ConverterInterface {
   bool GetLastConnectivePart(absl::string_view preceding_text, std::string *key,
                              std::string *value, uint16_t *id) const;
 
+  std::optional<std::string> GetReading(absl::string_view text) const;
+
+  void PopulateReadingOfCommittedCandidateIfMissing(Segments *segments) const;
+
+  bool PredictForRequestWithSegments(const ConversionRequest &request,
+                                     Segments *segments) const;
+
+  // Post processing after conversion.
+  // Rewriter, SuppressionDictionary, etc.
+  void ApplyPostProcessing(const ConversionRequest &request,
+                           Segments *segments) const;
+
   std::unique_ptr<engine::Modules> modules_;
   std::unique_ptr<const ImmutableConverterInterface> immutable_converter_;
   std::unique_ptr<prediction::PredictorInterface> predictor_;
@@ -209,11 +239,11 @@ class Converter final : public ConverterInterface {
 
   const dictionary::PosMatcher &pos_matcher_;
   const dictionary::UserDictionaryInterface &user_dictionary_;
-  const converter::HistoryReconstructor history_reconstructor_;
-  const converter::ReverseConverter reverse_converter_;
+  const HistoryReconstructor history_reconstructor_;
+  const ReverseConverter reverse_converter_;
   const uint16_t general_noun_id_ = std::numeric_limits<uint16_t>::max();
 };
-
+}  // namespace converter
 }  // namespace mozc
 
 #endif  // MOZC_CONVERTER_CONVERTER_H_

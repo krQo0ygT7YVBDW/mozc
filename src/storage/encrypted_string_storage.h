@@ -33,7 +33,6 @@
 #include <string>
 
 #include "absl/strings/string_view.h"
-#include "base/random.h"
 
 namespace mozc {
 namespace storage {
@@ -56,13 +55,14 @@ class EncryptedStringStorage : public StringStorageInterface {
   bool Load(std::string *output) const override;
   bool Save(const std::string &input) const override;
 
+  const std::string &filename() const { return filename_; }
+
  protected:
   virtual bool Encrypt(const std::string &salt, std::string *data) const;
   virtual bool Decrypt(const std::string &salt, std::string *data) const;
 
  private:
   std::string filename_;
-  mutable mozc::Random random_;
 };
 
 }  // namespace storage

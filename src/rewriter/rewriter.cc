@@ -36,6 +36,7 @@
 #include "dictionary/dictionary_interface.h"
 #include "dictionary/pos_group.h"
 #include "dictionary/pos_matcher.h"
+#include "dictionary/single_kanji_dictionary.h"
 #include "engine/modules.h"
 #include "rewriter/a11y_description_rewriter.h"
 #include "rewriter/calculator_rewriter.h"
@@ -50,7 +51,6 @@
 #include "rewriter/ivs_variants_rewriter.h"
 #include "rewriter/language_aware_rewriter.h"
 #include "rewriter/number_rewriter.h"
-#include "rewriter/order_rewriter.h"
 #include "rewriter/remove_redundant_candidate_rewriter.h"
 #include "rewriter/single_kanji_rewriter.h"
 #include "rewriter/small_letter_rewriter.h"
@@ -132,6 +132,8 @@ Rewriter::Rewriter(const engine::Modules &modules) {
   const dictionary::DictionaryInterface &dictionary = modules.GetDictionary();
   const dictionary::PosMatcher &pos_matcher = modules.GetPosMatcher();
   const dictionary::PosGroup &pos_group = modules.GetPosGroup();
+  const dictionary::SingleKanjiDictionary &single_kanji_dictionary =
+      modules.GetSingleKanjiDictionary();
 
 #ifdef MOZC_USER_DICTIONARY_REWRITER
   AddRewriter(std::make_unique<UserDictionaryRewriter>());
@@ -143,7 +145,8 @@ Rewriter::Rewriter(const engine::Modules &modules) {
   AddRewriter(std::make_unique<EnglishVariantsRewriter>(pos_matcher));
   AddRewriter(std::make_unique<NumberRewriter>(data_manager));
   AddRewriter(CollocationRewriter::Create(data_manager));
-  AddRewriter(std::make_unique<SingleKanjiRewriter>(data_manager));
+  AddRewriter(std::make_unique<SingleKanjiRewriter>(pos_matcher,
+                                                    single_kanji_dictionary));
   AddRewriter(std::make_unique<IvsVariantsRewriter>());
   AddRewriter(std::make_unique<EmojiRewriter>(data_manager));
   AddRewriter(EmoticonRewriter::CreateFromDataManager(data_manager));
@@ -182,7 +185,6 @@ Rewriter::Rewriter(const engine::Modules &modules) {
   AddRewriter(std::make_unique<T13nPromotionRewriter>());
   AddRewriter(std::make_unique<EnvironmentalFilterRewriter>(data_manager));
   AddRewriter(std::make_unique<RemoveRedundantCandidateRewriter>());
-  AddRewriter(std::make_unique<OrderRewriter>());
   AddRewriter(std::make_unique<A11yDescriptionRewriter>(data_manager));
 }
 

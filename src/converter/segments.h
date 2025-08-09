@@ -49,9 +49,9 @@
 #include "base/util.h"
 #include "converter/candidate.h"
 #include "converter/lattice.h"
-#include "testing/friend_test.h"
 
 namespace mozc {
+namespace converter {
 
 class Segment final {
  public:
@@ -78,7 +78,7 @@ class Segment final {
     segment_type_ = segment_type;
   }
 
-  const std::string &key() const { return key_; }
+  absl::string_view key() const { return key_; }
 
   // Returns the length of the key in Unicode characters. (e.g. 1 for "あ")
   size_t key_len() const { return key_len_; }
@@ -198,22 +198,6 @@ class Segment final {
 //  segment(i + history_segments_size()) == conversion_segment(i)
 class Segments final {
  public:
-  // Client of segments can remember any string which can be used
-  // to revert the last Finish operation.
-  // "id" can be used for identifying the purpose of the key;
-  struct RevertEntry {
-    enum RevertEntryType {
-      CREATE_ENTRY,
-      UPDATE_ENTRY,
-    };
-    uint16_t revert_entry_type = 0;
-    // UserHitoryPredictor uses '1', UserSegmentHistoryRewriter uses '2' for
-    // now. Do not use duplicate keys.
-    uint16_t id = 0;
-    uint32_t timestamp = 0;
-    std::string key;
-  };
-
   // This class wraps an iterator as is, except that `operator*` dereferences
   // twice. For example, if `InnerIterator` is the iterator of
   // `std::deque<Segment *>`, `operator*` dereferences to `Segment&`.
@@ -462,18 +446,17 @@ class Segments final {
     return os << segments.DebugString();
   }
 
-  // Revert entries
-  void clear_revert_entries() { revert_entries_.clear(); }
-  size_t revert_entries_size() const { return revert_entries_.size(); }
-  RevertEntry *push_back_revert_entry();
-  const RevertEntry &revert_entry(size_t i) const { return revert_entries_[i]; }
-  RevertEntry *mutable_revert_entry(size_t i) { return &revert_entries_[i]; }
+  // Revert id.
+  // Client remembers the last finish operation with `revert_id`.
+  // TODO(taku): support multiple revert ids to support undo/redo.
+  void set_revert_id(uint64_t revert_id) { revert_id_ = revert_id; }
+  uint64_t revert_id() const { return revert_id_; }
 
   // setter
   Lattice *mutable_cached_lattice() { return &cached_lattice_; }
 
  private:
-  FRIEND_TEST(SegmentsTest, BasicTest);
+  friend class SegmentsPoolAccessorTestPeer;
 
   iterator history_segments_end();
   const_iterator history_segments_end() const;
@@ -484,7 +467,7 @@ class Segments final {
 
   ObjectPool<Segment> pool_;
   std::deque<Segment *> segments_;
-  std::vector<RevertEntry> revert_entries_;
+  uint64_t revert_id_ = 0;
   Lattice cached_lattice_;
   // LINT.ThenChange(//converter/segments_matchers.h)
 };
@@ -514,6 +497,12 @@ inline converter::Candidate *Segment::mutable_candidate(int i) {
   DCHECK_LT(i, candidates_.size());
   return candidates_[i];
 }
+}  // namespace converter
+
+// This is an alias for backward compatibility.
+// Using ::mozc::converter::Segment is preferred.
+using Segment = ::mozc::converter::Segment;
+using Segments = ::mozc::converter::Segments;
 
 }  // namespace mozc
 

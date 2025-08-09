@@ -39,11 +39,15 @@
 #include <utility>
 #include <vector>
 
+#include "absl/base/attributes.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
 #include "base/container/trie.h"
+#include "dictionary/pos_matcher.h"
+#include "prediction/result.h"
+#include "request/conversion_request.h"
 
-namespace mozc {
+namespace mozc::prediction {
 
 struct NumberDecoderResult;
 
@@ -89,7 +93,7 @@ struct State {
 
   template <typename Sink>
   friend void AbslStringify(Sink &sink, const State &state) {
-    absl::StrFormat(
+    absl::Format(
         &sink,
         "small_digit_num: %d, num_str: %s, sd: %d, bd: %d, consumed_blen: %d",
         state.small_digit_num, state.current_num_str, state.small_digit,
@@ -150,34 +154,38 @@ std::ostream &operator<<(std::ostream &os, const NumberDecoderResult &r);
 
 class NumberDecoder {
  public:
-  using Result = NumberDecoderResult;
-
-  NumberDecoder();
+  explicit NumberDecoder(
+      const dictionary::PosMatcher &pos_matcher ABSL_ATTRIBUTE_LIFETIME_BOUND);
 
   NumberDecoder(NumberDecoder &&) = default;
   NumberDecoder &operator=(NumberDecoder &&) = default;
 
-  std::vector<Result> Decode(absl::string_view key) const;
+  std::vector<NumberDecoderResult> Decode(absl::string_view key) const;
+
+  std::vector<Result> Decode(const ConversionRequest &request) const;
 
  private:
   void DecodeAux(absl::string_view key, number_decoder_internal::State &state,
-                 std::vector<Result> &results) const;
+                 std::vector<NumberDecoderResult> &results) const;
   bool HandleUnitEntry(absl::string_view key,
                        const number_decoder_internal::Entry &entry,
                        number_decoder_internal::State &state,
-                       std::vector<Result> &results) const;
+                       std::vector<NumberDecoderResult> &results) const;
   bool HandleSmallDigitEntry(absl::string_view key,
                              const number_decoder_internal::Entry &entry,
                              number_decoder_internal::State &state,
-                             std::vector<Result> &results) const;
+                             std::vector<NumberDecoderResult> &results) const;
   bool HandleBigDigitEntry(absl::string_view key,
                            const number_decoder_internal::Entry &entry,
                            number_decoder_internal::State &state,
-                           std::vector<Result> &results) const;
+                           std::vector<NumberDecoderResult> &results) const;
 
-  Trie<number_decoder_internal::Entry> entries_;
+  const Trie<number_decoder_internal::Entry> &entries_;
+
+  const uint16_t kanji_number_id_;
+  const uint16_t number_id_;
 };
 
-}  // namespace mozc
+}  // namespace mozc::prediction
 
 #endif  // MOZC_PREDICTION_NUMBER_DECODER_H_

@@ -44,15 +44,24 @@
 #include "converter/candidate.h"
 #include "testing/gmock.h"
 #include "testing/gunit.h"
+#include "testing/test_peer.h"
 
 namespace mozc {
+namespace converter {
 
-using converter::Candidate;
+class SegmentsPoolAccessorTestPeer : testing::TestPeer<Segments> {
+ public:
+  explicit SegmentsPoolAccessorTestPeer(Segments &segments)
+      : testing::TestPeer<Segments>(segments) {}
+
+  size_t released_size() const { return value_.pool_.released_size(); }
+};
+
 using ::testing::ElementsAre;
 
 template <typename T>
-static std::vector<std::string> ToKeys(const T &segments) {
-  std::vector<std::string> keys;
+static std::vector<absl::string_view> ToKeys(const T &segments) {
+  std::vector<absl::string_view> keys;
   for (const Segment &segment : segments) {
     keys.push_back(segment.key());
   }
@@ -104,23 +113,25 @@ TEST(SegmentsTest, BasicTest) {
     seg[i] = segments.push_back_segment();
   }
 
+  const SegmentsPoolAccessorTestPeer sp(segments);
+
   // erase
   segments.erase_segment(1);
   EXPECT_EQ(segments.mutable_segment(0), seg[0]);
   EXPECT_EQ(segments.mutable_segment(1), seg[2]);
-  EXPECT_EQ(segments.pool_.released_.size(), 1);
+  EXPECT_EQ(sp.released_size(), 1);
 
   segments.erase_segments(1, 2);
   EXPECT_EQ(segments.mutable_segment(0), seg[0]);
   EXPECT_EQ(segments.mutable_segment(1), seg[4]);
-  EXPECT_EQ(segments.pool_.released_.size(), 3);
+  EXPECT_EQ(sp.released_size(), 3);
 
   EXPECT_EQ(segments.segments_size(), 2);
 
   segments.erase_segments(0, 1);
   EXPECT_EQ(segments.segments_size(), 1);
   EXPECT_EQ(segments.mutable_segment(0), seg[4]);
-  EXPECT_EQ(segments.pool_.released_.size(), 4);
+  EXPECT_EQ(sp.released_size(), 4);
 
   // insert
   seg[1] = segments.insert_segment(1);
@@ -288,44 +299,13 @@ TEST(SegmentTest, CandidateTest) {
 
 TEST(SegmentsTest, RevertEntryTest) {
   Segments segments;
-  EXPECT_EQ(segments.revert_entries_size(), 0);
+  EXPECT_EQ(segments.revert_id(), 0);
 
-  constexpr int kSize = 10;
-  for (int i = 0; i < kSize; ++i) {
-    Segments::RevertEntry *e = segments.push_back_revert_entry();
-    e->key = "test" + std::to_string(i);
-    e->id = i;
-  }
+  segments.set_revert_id(123);
+  EXPECT_EQ(segments.revert_id(), 123);
 
-  EXPECT_EQ(segments.revert_entries_size(), kSize);
-
-  for (int i = 0; i < kSize; ++i) {
-    {
-      const Segments::RevertEntry &e = segments.revert_entry(i);
-      EXPECT_EQ(e.key, std::string("test") + std::to_string(i));
-      EXPECT_EQ(e.id, i);
-    }
-    {
-      Segments::RevertEntry *e = segments.mutable_revert_entry(i);
-      EXPECT_EQ(e->key, std::string("test") + std::to_string(i));
-      EXPECT_EQ(e->id, i);
-    }
-  }
-
-  for (int i = 0; i < kSize; ++i) {
-    Segments::RevertEntry *e = segments.mutable_revert_entry(i);
-    e->id = kSize - i;
-    e->key = "test2" + std::to_string(i);
-  }
-
-  for (int i = 0; i < kSize; ++i) {
-    const Segments::RevertEntry &e = segments.revert_entry(i);
-    EXPECT_EQ(e.key, std::string("test2") + std::to_string(i));
-    EXPECT_EQ(e.id, kSize - i);
-  }
-
-  segments.clear_revert_entries();
-  EXPECT_EQ(segments.revert_entries_size(), 0);
+  segments.Clear();
+  EXPECT_EQ(segments.revert_id(), 0);
 }
 
 TEST(SegmentsTest, CopyTest) {
@@ -869,4 +849,5 @@ TEST(SegmentTest, IteratorRange) {
   EXPECT_THAT(ToKeys(segments.all().subrange(5, 2)), ElementsAre());
   EXPECT_THAT(ToKeys(segments.all().subrange(6, 2)), ElementsAre());
 }
+}  // namespace converter
 }  // namespace mozc

@@ -34,7 +34,6 @@
 #include <cstdint>
 #include <iterator>
 #include <memory>
-#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -48,7 +47,6 @@
 #include "absl/time/time.h"
 #include "base/clock.h"
 #include "base/clock_mock.h"
-#include "composer/query.h"
 #include "config/config_handler.h"
 #include "data_manager/data_manager.h"
 #include "data_manager/testing/mock_data_manager.h"
@@ -56,7 +54,6 @@
 #include "engine/engine_interface.h"
 #include "engine/engine_mock.h"
 #include "engine/mock_data_engine_factory.h"
-#include "engine/modules.h"
 #include "protocol/commands.pb.h"
 #include "protocol/config.pb.h"
 #include "session/keymap.h"
@@ -65,6 +62,7 @@
 #include "testing/gmock.h"
 #include "testing/gunit.h"
 #include "testing/mozctest.h"
+#include "testing/test_peer.h"
 
 ABSL_DECLARE_FLAG(int32_t, max_session_size);
 ABSL_DECLARE_FLAG(int32_t, create_session_min_interval);
@@ -72,10 +70,18 @@ ABSL_DECLARE_FLAG(int32_t, last_command_timeout);
 ABSL_DECLARE_FLAG(int32_t, last_create_session_timeout);
 
 namespace mozc {
+
+class KeyMapManagerAccessorTestPeer : public testing::TestPeer<SessionHandler> {
+ public:
+  explicit KeyMapManagerAccessorTestPeer(SessionHandler &handler)
+      : testing::TestPeer<SessionHandler>(handler) {}
+
+  PEER_VARIABLE(key_map_manager_);
+};
+
 namespace {
 
 using ::mozc::session::testing::SessionHandlerTestBase;
-using ::testing::_;
 using ::testing::Return;
 
 EngineReloadResponse::Status SendMockEngineReloadRequest(
@@ -131,25 +137,21 @@ constexpr absl::string_view kOssMagicNumber = "\xEFMOZC\x0D\x0A";
 class SessionHandlerTest : public SessionHandlerTestBase {
  protected:
   SessionHandlerTest() {
-    const std::string mock_path = testing::GetSourcePath(
-        {MOZC_SRC_COMPONENTS("data_manager"), "testing", "mock_mozc.data"});
-    mock_request_.set_engine_type(EngineReloadRequest::MOBILE);
+    const std::string mock_path =
+        testing::GetSourcePath({"data_manager", "testing", "mock_mozc.data"});
     mock_request_.set_file_path(mock_path);
     mock_request_.set_magic_number(kMockMagicNumber);
 
-    const std::string oss_path = testing::GetSourcePath(
-        {MOZC_SRC_COMPONENTS("data_manager"), "oss", "mozc.data"});
-    oss_request_.set_engine_type(EngineReloadRequest::MOBILE);
+    const std::string oss_path =
+        testing::GetSourcePath({"data_manager", "oss", "mozc.data"});
     oss_request_.set_file_path(oss_path);
     oss_request_.set_magic_number(kOssMagicNumber);
 
-    const std::string invalid_path = testing::GetSourcePath(
-        {MOZC_SRC_COMPONENTS("data_manager"), "invalid", "mozc.data"});
-    invalid_path_request_.set_engine_type(EngineReloadRequest::MOBILE);
+    const std::string invalid_path =
+        testing::GetSourcePath({"data_manager", "invalid", "mozc.data"});
     invalid_path_request_.set_file_path(invalid_path);
     invalid_path_request_.set_magic_number(kOssMagicNumber);
 
-    invalid_data_request_.set_engine_type(EngineReloadRequest::MOBILE);
     invalid_data_request_.set_file_path(mock_path);
     invalid_data_request_.set_magic_number(kOssMagicNumber);
 
@@ -176,6 +178,15 @@ class SessionHandlerTest : public SessionHandlerTestBase {
   void TearDown() override {
     Clock::SetClockForUnitTest(nullptr);
     SessionHandlerTestBase::TearDown();
+  }
+
+  void ClearState() override {
+    if (handler_) {
+      commands::Command command;
+      command.mutable_input()->set_type(commands::Input::CLEAR_USER_PREDICTION);
+      handler_->EvalCommand(&command);
+    }
+    SessionHandlerTestBase::ClearState();
   }
 
   static std::unique_ptr<Engine> CreateMockDataEngine() {
@@ -569,7 +580,8 @@ TEST_F(SessionHandlerTest, KeyMapTest) {
     input->set_type(commands::Input::SET_CONFIG);
     input->mutable_config()->set_session_keymap(config::Config::MSIME);
     EXPECT_TRUE(handler.EvalCommand(&command));
-    msime_keymap = handler.key_map_manager_.get();
+    msime_keymap =
+        KeyMapManagerAccessorTestPeer(handler).key_map_manager_().get();
   }
   {
     commands::Command command;
@@ -580,7 +592,8 @@ TEST_F(SessionHandlerTest, KeyMapTest) {
     EXPECT_TRUE(handler.EvalCommand(&command));
     // As different keymap is set, the handler's keymap manager should be
     // updated.
-    EXPECT_NE(handler.key_map_manager_.get(), msime_keymap);
+    EXPECT_NE(KeyMapManagerAccessorTestPeer(handler).key_map_manager_().get(),
+              msime_keymap);
   }
 }
 

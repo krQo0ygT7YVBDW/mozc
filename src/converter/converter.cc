@@ -37,29 +37,39 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <utility>
+#include <vector>
 
 #include "absl/base/optimization.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
+#include "absl/random/random.h"
+#include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
+#include "base/strings/assign.h"
 #include "base/util.h"
 #include "base/vlog.h"
 #include "composer/composer.h"
+#include "converter/attribute.h"
+#include "converter/candidate.h"
 #include "converter/history_reconstructor.h"
 #include "converter/immutable_converter_interface.h"
+#include "converter/inner_segment.h"
 #include "converter/reverse_converter.h"
 #include "converter/segments.h"
 #include "dictionary/pos_matcher.h"
 #include "engine/modules.h"
 #include "prediction/predictor_interface.h"
+#include "prediction/result.h"
 #include "protocol/commands.pb.h"
 #include "request/conversion_request.h"
 #include "rewriter/rewriter_interface.h"
 #include "transliteration/transliteration.h"
 
 namespace mozc {
+namespace converter {
 namespace {
 
 constexpr size_t kErrorIndex = static_cast<size_t>(-1);
@@ -164,14 +174,14 @@ bool Converter::StartReverseConversion(Segments *segments,
 }
 
 // static
-void Converter::MaybeSetConsumedKeySizeToCandidate(
-    size_t consumed_key_size, Segment::Candidate *candidate) {
-  if (candidate->attributes & Segment::Candidate::PARTIALLY_KEY_CONSUMED) {
+void Converter::MaybeSetConsumedKeySizeToCandidate(size_t consumed_key_size,
+                                                   Candidate *candidate) {
+  if (candidate->attributes & Attribute::PARTIALLY_KEY_CONSUMED) {
     // If PARTIALLY_KEY_CONSUMED is set already,
     // the candidate has set appropriate attribute and size by predictor.
     return;
   }
-  candidate->attributes |= Segment::Candidate::PARTIALLY_KEY_CONSUMED;
+  candidate->attributes |= Attribute::PARTIALLY_KEY_CONSUMED;
   candidate->consumed_key_size = consumed_key_size;
 }
 
@@ -222,13 +232,39 @@ bool Converter::StartPrediction(const ConversionRequest &request,
   DCHECK_EQ(segments->conversion_segments_size(), 1);
   DCHECK_EQ(segments->conversion_segment(0).key(), key);
 
-  if (!predictor_->PredictForRequest(request, segments)) {
+  if (!PredictForRequestWithSegments(request, segments)) {
     // Prediction can fail for keys like "12". Even in such cases, rewriters
     // (e.g., number and variant rewriters) can populate some candidates.
     // Therefore, this is not an error.
     MOZC_VLOG(1) << "PredictForRequest failed for key: "
                  << segments->segment(0).key();
   }
+  ApplyPostProcessing(request, segments);
+  return IsValidSegments(request, *segments);
+}
+
+bool Converter::StartPredictionWithPreviousSuggestion(
+    const ConversionRequest &request, const Segment &previous_segment,
+    Segments *segments) const {
+  bool result = StartPrediction(request, segments);
+  segments->PrependCandidates(previous_segment);
+  if (!result) {
+    return false;
+  }
+
+  ApplyPostProcessing(request, segments);
+  return IsValidSegments(request, *segments);
+}
+
+void Converter::PrependCandidates(const ConversionRequest &request,
+                                  const Segment &segment,
+                                  Segments *segments) const {
+  segments->PrependCandidates(segment);
+  ApplyPostProcessing(request, segments);
+}
+
+void Converter::ApplyPostProcessing(const ConversionRequest &request,
+                                    Segments *segments) const {
   RewriteAndSuppressCandidates(request, segments);
   TrimCandidates(request, segments);
   if (request.request_type() == ConversionRequest::PARTIAL_SUGGESTION ||
@@ -242,10 +278,9 @@ bool Converter::StartPrediction(const ConversionRequest &request,
     // To do this, PARTIALLY_KEY_CONSUMED and consumed_key_size should be set.
     // Note that this process should be done in a predictor because
     // we have to do this on the candidates created by rewriters.
-    MaybeSetConsumedKeySizeToSegment(Util::CharsLen(key),
+    MaybeSetConsumedKeySizeToSegment(Util::CharsLen(request.key()),
                                      segments->mutable_conversion_segment(0));
   }
-  return IsValidSegments(request, *segments);
 }
 
 void Converter::FinishConversion(const ConversionRequest &request,
@@ -264,9 +299,31 @@ void Converter::FinishConversion(const ConversionRequest &request,
     }
   }
 
-  segments->clear_revert_entries();
-  rewriter_->Finish(request, segments);
-  predictor_->Finish(request, segments);
+  PopulateReadingOfCommittedCandidateIfMissing(segments);
+
+  // Sets unique revert id.
+  // Clients store the last commit operations with this id.
+  absl::BitGen bitgen;
+  const uint64_t revert_id = absl::Uniform<uint64_t>(
+      absl::IntervalClosed, bitgen, 1, std::numeric_limits<uint64_t>::max());
+  segments->set_revert_id(revert_id);
+
+  const prediction::Result history_result = MakeHistoryResult(*segments);
+  const std::vector<prediction::Result> committed_results =
+      MakeLearningResults(*segments);
+  const ConversionRequest finish_req = ConversionRequestBuilder()
+                                           .SetConversionRequestView(request)
+                                           .SetHistoryResultView(history_result)
+                                           .Build();
+  rewriter_->Finish(finish_req, *segments);
+  predictor_->Finish(finish_req, committed_results, segments->revert_id());
+
+  if (request.request_type() != ConversionRequest::CONVERSION &&
+      segments->conversion_segments_size() >= 1 &&
+      segments->conversion_segment(0).candidates_size() >= 1) {
+    Segment *segment = segments->mutable_conversion_segment(0);
+    segment->set_key(segment->candidate(0).key);
+  }
 
   // Remove the front segments except for some segments which will be
   // used as history segments.
@@ -289,12 +346,12 @@ void Converter::CancelConversion(Segments *segments) const {
 void Converter::ResetConversion(Segments *segments) const { segments->Clear(); }
 
 void Converter::RevertConversion(Segments *segments) const {
-  if (segments->revert_entries_size() == 0) {
+  if (segments->revert_id() == 0) {
     return;
   }
-  rewriter_->Revert(segments);
-  predictor_->Revert(segments);
-  segments->clear_revert_entries();
+  rewriter_->Revert(*segments);
+  predictor_->Revert(segments->revert_id());
+  segments->set_revert_id(0);
 }
 
 bool Converter::DeleteCandidateFromHistory(const Segments &segments,
@@ -303,7 +360,7 @@ bool Converter::DeleteCandidateFromHistory(const Segments &segments,
   DCHECK_LT(segment_index, segments.segments_size());
   const Segment &segment = segments.segment(segment_index);
   DCHECK(segment.is_valid_index(candidate_index));
-  const Segment::Candidate &candidate = segment.candidate(candidate_index);
+  const Candidate &candidate = segment.candidate(candidate_index);
   bool result = false;
   result |=
       rewriter_->ClearHistoryEntry(segments, segment_index, candidate_index);
@@ -337,7 +394,7 @@ bool Converter::CommitSegmentValueInternal(
   segment->move_candidate(candidate_index, 0);
 
   if (candidate_index != 0) {
-    segment->mutable_candidate(0)->attributes |= Segment::Candidate::RERANKED;
+    segment->mutable_candidate(0)->attributes |= Attribute::RERANKED;
   }
 
   return true;
@@ -456,11 +513,11 @@ void Converter::ApplyConversion(Segments *segments,
     MOZC_VLOG(1) << "ConvertForRequest failed for key: "
                  << segments->segment(0).key();
   }
-  RewriteAndSuppressCandidates(request, segments);
-  TrimCandidates(request, segments);
+
+  ApplyPostProcessing(request, segments);
 }
 
-void Converter::CompletePosIds(Segment::Candidate *candidate) const {
+void Converter::CompletePosIds(Candidate *candidate) const {
   DCHECK(candidate);
   if (candidate->value.empty() || candidate->key.empty()) {
     return;
@@ -503,8 +560,7 @@ void Converter::CompletePosIds(Segment::Candidate *candidate) const {
       return;
     }
     for (size_t i = 0; i < segments.segment(0).candidates_size(); ++i) {
-      const Segment::Candidate &ref_candidate =
-          segments.segment(0).candidate(i);
+      const Candidate &ref_candidate = segments.segment(0).candidate(i);
       if (ref_candidate.value == candidate->value) {
         candidate->lid = ref_candidate.lid;
         candidate->rid = ref_candidate.rid;
@@ -559,7 +615,7 @@ void Converter::RewriteAndSuppressCandidates(const ConversionRequest &request,
   // converter.
   for (Segment &segment : segments->conversion_segments()) {
     for (size_t j = 0; j < segment.candidates_size();) {
-      const Segment::Candidate &cand = segment.candidate(j);
+      const Candidate &cand = segment.candidate(j);
       if (user_dictionary_.IsSuppressedEntry(cand.key, cand.value)) {
         segment.erase_candidate(j);
       } else {
@@ -602,4 +658,199 @@ bool Converter::Wait() {
   return predictor().Wait();
 }
 
+std::optional<std::string> Converter::GetReading(absl::string_view text) const {
+  Segments segments;
+  if (!StartReverseConversion(&segments, text)) {
+    LOG(ERROR) << "Reverse conversion failed to get the reading of " << text;
+    return std::nullopt;
+  }
+  if (segments.conversion_segments_size() != 1 ||
+      segments.conversion_segment(0).candidates_size() == 0) {
+    LOG(ERROR) << "Reverse conversion returned an invalid result for " << text;
+    return std::nullopt;
+  }
+  return std::move(
+      segments.mutable_conversion_segment(0)->mutable_candidate(0)->value);
+}
+
+void Converter::PopulateReadingOfCommittedCandidateIfMissing(
+    Segments *segments) const {
+  if (segments->conversion_segments_size() == 0) return;
+
+  Segment *segment = segments->mutable_conversion_segment(0);
+  if (segment->candidates_size() == 0) return;
+
+  Candidate *cand = segment->mutable_candidate(0);
+  if (!cand->key.empty() || cand->value.empty()) return;
+
+  if (cand->content_value == cand->value) {
+    if (std::optional<std::string> key = GetReading(cand->value);
+        key.has_value()) {
+      cand->key = *key;
+      cand->content_key = *std::move(key);
+    }
+    return;
+  }
+
+  if (cand->content_value.empty()) {
+    LOG(ERROR) << "Content value is empty: " << *cand;
+    return;
+  }
+
+  const absl::string_view functional_value = cand->functional_value();
+  if (Util::GetScriptType(functional_value) != Util::HIRAGANA) {
+    LOG(ERROR) << "The functional value is not hiragana: " << *cand;
+    return;
+  }
+  if (std::optional<std::string> content_key = GetReading(cand->content_value);
+      content_key.has_value()) {
+    cand->key = absl::StrCat(*content_key, functional_value);
+    cand->content_key = *std::move(content_key);
+  }
+}
+
+bool Converter::PredictForRequestWithSegments(const ConversionRequest &request,
+                                              Segments *segments) const {
+  DCHECK(segments);
+  DCHECK(predictor_);
+
+  const prediction::Result history_result = MakeHistoryResult(*segments);
+
+  const ConversionRequest conv_req = ConversionRequestBuilder()
+                                         .SetConversionRequestView(request)
+                                         .SetHistoryResultView(history_result)
+                                         .Build();
+
+  const std::vector<prediction::Result> results = predictor_->Predict(conv_req);
+
+  Segment *segment = segments->mutable_conversion_segment(0);
+  DCHECK(segment);
+
+  // TODO(taku): Make utility functions to convert
+  // Segments <-> history_result, committed_results.
+
+  for (const prediction::Result &result : results) {
+    Candidate *candidate = segment->add_candidate();
+    strings::Assign(candidate->key, result.key);
+    strings::Assign(candidate->value, result.value);
+    strings::Assign(candidate->description, result.description);
+    candidate->lid = result.lid;
+    candidate->rid = result.rid;
+    candidate->wcost = result.wcost;
+    candidate->cost = result.cost;
+    candidate->attributes = result.candidate_attributes;
+    candidate->consumed_key_size = result.consumed_key_size;
+    candidate->inner_segment_boundary = result.inner_segment_boundary;
+
+    // When inner_segment_boundary is available, generate
+    // content_key and content_value from the boundary info.
+    std::tie(candidate->content_key, candidate->content_value) =
+        result.inner_segments().GetMergedContentKeyAndValue();
+#ifndef NDEBUG
+    absl::StrAppend(&candidate->log, "\n", result.log);
+#endif  // NDEBUG
+  }
+
+  return !results.empty();
+}
+
+// static
+std::vector<prediction::Result> Converter::MakeLearningResults(
+    const Segments &segments) {
+  std::vector<prediction::Result> results;
+
+  if (segments.conversion_segments_size() == 0) {
+    return results;
+  }
+
+  // - segments_size = 1: Populates the nbest candidates to result.
+  if (segments.conversion_segments_size() == 1) {
+    // Populates only top 5 results.
+    // See UserHistoryPredictor::MaybeRemoveUnselectedHistory
+    constexpr int kMaxHistorySize = 5;
+    for (const auto &candidate : segments.conversion_segment(0).candidates()) {
+      prediction::Result result;
+      strings::Assign(result.key, candidate->key);
+      strings::Assign(result.value, candidate->value);
+      strings::Assign(result.description, candidate->description);
+      result.lid = candidate->lid;
+      result.rid = candidate->rid;
+      result.wcost = candidate->wcost;
+      result.cost = candidate->cost;
+      result.candidate_attributes = candidate->attributes;
+      result.consumed_key_size = candidate->consumed_key_size;
+      result.inner_segment_boundary = candidate->inner_segment_boundary;
+      // Force to set inner_segment_boundary from key/content_key.
+      if (result.inner_segment_boundary.empty()) {
+        result.inner_segment_boundary = BuildInnerSegmentBoundary(
+            {{candidate->key.size(), candidate->value.size(),
+              candidate->content_key.size(), candidate->content_value.size()}},
+            result.key, result.value);
+      }
+      results.emplace_back(std::move(result));
+      if (results.size() >= kMaxHistorySize) break;
+    }
+
+    return results;
+  }
+
+  // segments_size > 1: Populates the top candidate to result by
+  //                    concatenating the segments.
+  {
+    prediction::Result result;
+    InnerSegmentBoundaryBuilder builder;
+    for (const auto &segment : segments.conversion_segments()) {
+      if (segment.candidates_size() == 0) return {};
+      const Candidate &candidate = segment.candidate(0);
+      absl::StrAppend(&result.key, candidate.key);
+      absl::StrAppend(&result.value, candidate.value);
+      result.candidate_attributes |= candidate.attributes;
+      result.wcost += candidate.wcost;
+      result.cost += candidate.cost;
+      builder.Add(candidate.key.size(), candidate.value.size(),
+                  candidate.content_key.size(), candidate.content_value.size());
+    }
+    result.inner_segment_boundary = builder.Build(result.key, result.value);
+    const int size = segments.conversion_segments_size();
+    result.lid = segments.conversion_segment(0).candidate(0).lid;
+    result.rid = segments.conversion_segment(size - 1).candidate(0).rid;
+
+    results.emplace_back(std::move(result));
+  }
+
+  return results;
+}
+
+// static
+prediction::Result Converter::MakeHistoryResult(const Segments &segments) {
+  prediction::Result result;
+
+  if (segments.history_segments_size() == 0) {
+    return result;
+  }
+
+  InnerSegmentBoundaryBuilder builder;
+  for (const auto &segment : segments.history_segments()) {
+    if (segment.candidates_size() == 0) {
+      return prediction::Result::DefaultResult();  // Returns an empty result.
+    }
+    const Candidate &candidate = segment.candidate(0);
+    absl::StrAppend(&result.key, candidate.key);
+    absl::StrAppend(&result.value, candidate.value);
+    result.candidate_attributes |= candidate.attributes;
+    builder.Add(candidate.key.size(), candidate.value.size(),
+                candidate.content_key.size(), candidate.content_value.size());
+  }
+
+  result.inner_segment_boundary = builder.Build(result.key, result.value);
+
+  const int size = segments.history_segments_size();
+  result.lid = segments.history_segment(0).candidate(0).lid;
+  result.rid = segments.history_segment(size - 1).candidate(0).rid;
+  result.cost = segments.history_segment(size - 1).candidate(0).cost;
+
+  return result;
+}
+
+}  // namespace converter
 }  // namespace mozc

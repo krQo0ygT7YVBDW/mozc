@@ -41,6 +41,8 @@
 #include "absl/random/random.h"
 #include "absl/strings/string_view.h"
 #include "base/vlog.h"
+#include "converter/attribute.h"
+#include "converter/candidate.h"
 #include "converter/segments.h"
 #include "data_manager/data_manager.h"
 #include "data_manager/serialized_dictionary.h"
@@ -81,7 +83,7 @@ void InsertCandidates(SerializedDictionary::const_iterator begin,
     return;
   }
 
-  const Segment::Candidate &base_candidate = segment->candidate(0);
+  const converter::Candidate &base_candidate = segment->candidate(0);
   size_t offset = std::min(initial_insert_pos, segment->candidates_size());
 
   // Sort values by cost just in case
@@ -100,7 +102,7 @@ void InsertCandidates(SerializedDictionary::const_iterator begin,
       sorted_value.end());
 
   for (size_t i = 0; i < sorted_value.size(); ++i) {
-    Segment::Candidate *c = nullptr;
+    converter::Candidate *c = nullptr;
 
     if (i < initial_insert_size) {
       c = segment->insert_candidate(offset);
@@ -124,11 +126,11 @@ void InsertCandidates(SerializedDictionary::const_iterator begin,
     c->key = base_candidate.key;
     c->content_key = base_candidate.content_key;
     // no full/half width normalizations
-    c->attributes |= Segment::Candidate::NO_EXTRA_DESCRIPTION;
-    c->attributes |= Segment::Candidate::NO_VARIANTS_EXPANSION;
-    c->attributes |= Segment::Candidate::CONTEXT_SENSITIVE;
+    c->attributes |= converter::Attribute::NO_EXTRA_DESCRIPTION;
+    c->attributes |= converter::Attribute::NO_VARIANTS_EXPANSION;
+    c->attributes |= converter::Attribute::CONTEXT_SENSITIVE;
     if (is_no_learning) {
-      c->attributes |= Segment::Candidate::NO_LEARNING;
+      c->attributes |= converter::Attribute::NO_LEARNING;
     }
 
     constexpr char kBaseEmoticonDescription[] = "顔文字";
@@ -142,7 +144,7 @@ void InsertCandidates(SerializedDictionary::const_iterator begin,
                          sorted_value[i].description().size());
       c->description = description;
     }
-    c->category = Segment::Candidate::SYMBOL;
+    c->category = converter::Candidate::SYMBOL;
   }
 }
 
@@ -151,7 +153,7 @@ void InsertCandidates(SerializedDictionary::const_iterator begin,
 bool EmoticonRewriter::RewriteCandidate(Segments *segments) const {
   bool modified = false;
   for (Segment &segment : segments->conversion_segments()) {
-    const std::string &key = segment.key();
+    absl::string_view key = segment.key();
     if (key.empty()) {
       // This case happens for zero query suggestion.
       continue;
@@ -189,7 +191,8 @@ bool EmoticonRewriter::RewriteCandidate(Segments *segments) const {
       begin = dic_.begin();
       CHECK(begin != dic_.end());
       // use secure random not to predict the next emoticon.
-      begin += absl::Uniform(bitgen_, 0u, dic_.size());
+      absl::BitGen bitgen;
+      begin += absl::Uniform(bitgen, 0u, dic_.size());
       end = begin + 1;
       initial_insert_pos = RewriterUtil::CalculateInsertPosition(segment, 4);
       initial_insert_size = 1;

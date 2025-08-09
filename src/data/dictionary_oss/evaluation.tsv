@@ -208,7 +208,7 @@ OK:	さいのうをみいだす	才能を見出す	Conversion Expected 2	才能�
 FAILED:	いっぴょう	一瓢	Conversion Expected 2	一票	2.28.4880
 OK:	きそう	競う	Conversion Expected 9	寄贈	2.28.4880
 OK:	なぞめいてて	謎めいてて	Conversion Expected	謎めいてて	2.29.5268
-FAILED:	しょくじをしたにもかかわらず	食事を下にもかかわらず	Conversion Match	食事をした	2.28.5050
+OK:	しょくじをしたにもかかわらず	食事をしたにもかかわらず	Conversion Match	食事をした	2.31.5851
 FAILED:	さんぜんえん	産前円	Conversion Expected 2	三千円	2.28.5050
 OK:	はっせんえん	ハッ千円	Conversion Expected 2	八千円	2.30.5618
 FAILED:	きゅうせんえん	旧千円	Conversion Expected 2	九千円	2.28.4880
@@ -311,7 +311,7 @@ FAILED:	くうぐんしょうこう	空軍商工	Conversion Expected	空軍将�
 FAILED:	へんきんまち	返金街	Conversion Expected	返金待ち	2.30.5490
 OK:	いちじんしゃ	一迅社	Conversion Expected 9	一迅社	2.30.5618
 OK:	とうよ	投与	Conversion Expected 99	党与	2.30.5490
-FAILED:	けいゆう	慶祐	Conversion Expected 99	経由	2.30.5618
+OK:	けいゆう	経由	Conversion Expected 99	経由	2.31.5851
 OK:	おっぱ	オッパ	Conversion Expected 9	越波	2.30.5618
 FAILED:	じっぽん	十本	Conversion Expected 99	日本	2.30.5490
 OK:	いりなか	杁中	Conversion Expected 9	杁中	2.30.5618
@@ -320,7 +320,7 @@ OK:	よねずけんし	米津玄師	Conversion Expected	米津玄師	2.30.5490
 OK:	そきゃく	阻却	Conversion Expected 99	阻却	2.30.5520
 FAILED:	そきゃく	阻却	Conversion Expected 999	阻卻	2.30.5520
 OK:	いほうせいがそきゃくされる	違法性が阻却される	Conversion Expected	違法性が阻却される	2.30.5520
-FAILED:	かいほう	解放	Conversion Expected 99	開封	2.30.5618
+OK:	かいほう	解放	Conversion Expected 99	開封	2.31.5712
 OK:	いんきゃ	陰キャ	Conversion Expected 9	陰キャ	2.30.5618
 OK:	あおぞらぎんこう	あおぞら銀行	Conversion Expected	あおぞら銀行	2.30.5520
 OK:	ゆうちょぎんこう	ゆうちょ銀行	Conversion Expected	ゆうちょ銀行	2.30.5618
@@ -503,3 +503,28 @@ FAILED:	おきてねがおみてた	起きて音がお見てた	Conversion Expec
 FAILED:	ほかのようじもできた	他の幼児もできた	Conversion Expected	他の用事もできた	2.30.5544
 OK:	きょうきゅうりょうび！	今日給料日！	Conversion Expected	今日給料日！	2.30.5618
 OK:	みたことないとりいる	見たことない鳥いる	Conversion Expected	見たことない鳥いる	2.30.5544
+FAILED:	れいしょう	冷笑	Conversion Expected 99	0勝	2.31.5810
+OK:	れいしょう	冷笑	Conversion Expected 99	冷笑	2.31.5810
+OK:	いっかい	一回	Conversion Expected 99	1階	2.31.5810
+OK:	いっかい	一回	Conversion Expected 99	一介	2.31.5810
+OK:	にじ	二時	Conversion Expected 99	2時	2.31.5810
+FAILED:	にじ	二時	Conversion Expected 99	虹	2.31.5810
+OK:	さんしゅう	三周	Conversion Expected 99	3週	2.31.5810
+OK:	さんしゅう	三周	Conversion Expected 99	参集	2.31.5810
+OK:	よじ	よじ	Conversion Expected 99	4時	2.31.5810
+OK:	よじ	よじ	Conversion Expected 99	余事	2.31.5810
+OK:	ごかい	五回	Conversion Expected 99	5階	2.31.5810
+OK:	ごかい	五回	Conversion Expected 99	誤解	2.31.5810
+OK:	ろくが	録画	Conversion Expected 99	6が	2.31.5810
+OK:	ろくが	録画	Conversion Expected 99	録画	2.31.5810
+FAILED:	ななちゃん	無無ちゃん	Conversion Expected 99	7チャン	2.31.5810
+OK:	ななちゃん	無無ちゃん	Conversion Expected 99	ナナちゃん	2.31.5810
+FAILED:	はってん	発展	Conversion Expected 99	8点	2.31.5810
+OK:	はってん	発展	Conversion Expected 99	発展	2.31.5810
+FAILED:	きゅうしゅう	吸収	Conversion Expected 99	9週	2.31.5810
+OK:	きゅうしゅう	吸収	Conversion Expected 99	吸収	2.31.5810
+OK:	せんこう	先行	Conversion Expected 99	閃光	2.31.5851
+OK:	せんこうとともに	先行とともに	Conversion Expected 99	閃光とともに	2.31.5851
+OK:	おふろはいりません	お風呂入りません	Conversion Expected	お風呂入りません	2.31.5851
+FAILED:	おちゃはいりません	お茶入りません	Conversion Expected	お茶はいりません	2.31.5851
+OK:	きいてください	聞いてください	Conversion Expected 9	聞いてください	2.31.5851

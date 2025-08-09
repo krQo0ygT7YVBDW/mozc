@@ -38,6 +38,7 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "base/util.h"
+#include "converter/candidate.h"
 #include "converter/segments.h"
 #include "data_manager/data_manager.h"
 #include "data_manager/serialized_dictionary.h"
@@ -186,14 +187,14 @@ A11yDescriptionRewriter::A11yDescriptionRewriter(
 }
 
 void A11yDescriptionRewriter::AddA11yDescription(
-    Segment::Candidate *candidate) const {
-  const std::string &content_value = candidate->content_value;
-  std::string buf(content_value);
+    converter::Candidate *candidate) const {
+  absl::string_view value = candidate->value;
+  std::string buf(value);
   CharacterType previous_type = INITIAL_STATE;
   CharacterType current_type = INITIAL_STATE;
   std::vector<std::string> graphemes;
-  Util::SplitStringToUtf8Graphemes(content_value, &graphemes);
-  for (const std::string &grapheme : graphemes) {
+  Util::SplitStringToUtf8Graphemes(value, &graphemes);
+  for (absl::string_view grapheme : graphemes) {
     const std::u32string codepoints = Util::Utf8ToUtf32(grapheme);
     for (const char32_t codepoint : codepoints) {
       previous_type = current_type;
@@ -234,7 +235,7 @@ bool A11yDescriptionRewriter::Rewrite(const ConversionRequest &request,
   bool modified = false;
   for (Segment &segment : segments->conversion_segments()) {
     for (size_t j = 0; j < segment.candidates_size(); ++j) {
-      Segment::Candidate *candidate = segment.mutable_candidate(j);
+      converter::Candidate *candidate = segment.mutable_candidate(j);
       AddA11yDescription(candidate);
       modified = true;
     }

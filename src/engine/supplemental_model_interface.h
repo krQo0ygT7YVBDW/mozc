@@ -31,13 +31,12 @@
 #define MOZC_ENGINE_SUPPLEMENTAL_MODEL_INTERFACE_H_
 
 #include <optional>
+#include <utility>
 #include <vector>
 
-#include "absl/base/nullability.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "composer/query.h"
-#include "converter/segments.h"
 #include "prediction/result.h"
 #include "protocol/commands.pb.h"
 #include "protocol/engine_builder.pb.h"
@@ -64,32 +63,38 @@ class SupplementalModelInterface {
   // Returns std::nullopt when the composition spellchecker is not
   // enabled/available.
   virtual std::optional<std::vector<composer::TypeCorrectedQuery>>
-  CorrectComposition(const ConversionRequest &request,
-                     const Segments &segments) const {
+  CorrectComposition(const ConversionRequest &request) const {
     return std::nullopt;
   }
 
   // Populates the typing correction penalty and attribute to `results`.
   virtual void PopulateTypeCorrectedQuery(
-      const ConversionRequest &request, const Segments &segments,
+      const ConversionRequest &request,
       absl::Span<prediction::Result> results) const {}
 
-  // Performs general post correction on `segments`.
+  // Performs general post correction on `results`.
   virtual void PostCorrect(const ConversionRequest &request,
-                           const Segments &segments,
                            std::vector<prediction::Result> &results) const {}
 
-  // Performs rescoring for `results` given the context `segments`.
+  // Performs rescoring for `results` given the context `results`.
   virtual void RescoreResults(const ConversionRequest &request,
-                              const Segments &segments,
                               absl::Span<prediction::Result> results) const {}
 
-  // Performs next word/phrase prediction given the context `segments`. Results
-  // are appended to `results`. Returns true if prediction was performed.
+  // Performs next word/phrase prediction given the context in `request`.
+  // Results are appended to `results`. Returns true if prediction was
+  // performed.
   virtual bool Predict(const ConversionRequest &request,
-                       const Segments &segments,
                        std::vector<prediction::Result> &results) const {
     return false;
+  }
+
+  // Returns character-by-mora reading to surface alignment.
+  // {東,とう},{京,きょう} = GetReadingAlignment("東京", "とうきょう")
+  // Returns empty list when no alignment is available.
+  virtual std::vector<std::pair<absl::string_view, absl::string_view>>
+  GetReadingAlignment(absl::string_view surface,
+                      absl::string_view reading) const {
+    return {};
   }
 };
 

@@ -115,6 +115,7 @@ const char *kScenarioFileList[] = {
     DATA_DIR "commit_by_space.txt",
     DATA_DIR "composing_alphanumeric.txt",
     DATA_DIR "composition_display_as.txt",
+    DATA_DIR "composition_itchome.txt",
     DATA_DIR "conversion.txt",
     DATA_DIR "conversion_display_as.txt",
     DATA_DIR "conversion_with_history_segment.txt",
@@ -145,7 +146,9 @@ const char *kScenarioFileList[] = {
     DATA_DIR "segment_focus.txt",
     DATA_DIR "segment_width.txt",
     DATA_DIR "suggest_after_zero_query.txt",
+    DATA_DIR "switch_kana_type.txt",
     DATA_DIR "t13n_negative_number.txt",
+    DATA_DIR "t13n_rewriter_twice.txt",
     DATA_DIR "toggle_flick_hiragana_preedit_a.txt",
     DATA_DIR "toggle_flick_hiragana_preedit_ka.txt",
     DATA_DIR "toggle_flick_hiragana_preedit_sa.txt",
@@ -157,6 +160,7 @@ const char *kScenarioFileList[] = {
     DATA_DIR "toggle_flick_hiragana_preedit_ra.txt",
     DATA_DIR "toggle_flick_hiragana_preedit_wa.txt",
     DATA_DIR "toggle_flick_hiragana_preedit_symbol.txt",
+    DATA_DIR "transliterations_f10.txt",
     DATA_DIR "twelvekeys_switch_inputmode_scenario.txt",
     DATA_DIR "twelvekeys_toggle_flick_alphabet_scenario.txt",
     DATA_DIR "twelvekeys_toggle_hiragana_preedit_scenario_a.txt",
@@ -197,7 +201,7 @@ void ParseLine(SessionHandlerInterpreter &handler, const std::string &line) {
 TEST_P(SessionHandlerScenarioTest, TestImplBase) {
   // Open the scenario file.
   const absl::StatusOr<std::string> scenario_path =
-      mozc::testing::GetSourceFile({MOZC_DICT_DIR_COMPONENTS, GetParam()});
+      mozc::testing::GetSourceFile({"data", GetParam()});
   ASSERT_TRUE(scenario_path.ok()) << scenario_path.status();
   handler_->ClearAll();
   LOG(INFO) << "Testing " << FileUtil::Basename(*scenario_path);
@@ -250,23 +254,14 @@ commands::Request GetMobileRequest() {
 // Makes sure that the results are not changed by experiment params.
 INSTANTIATE_TEST_SUITE_P(
     TestForExperimentParams, SessionHandlerScenarioTestForRequest,
-    ::testing::Combine(
-        ::testing::ValuesIn(kScenariosForExperimentParams),
-        ::testing::Values(
-            GetMobileRequest(),
-            []() {
-              auto request = GetMobileRequest();
-              request.mutable_decoder_experiment_params()
-                  ->set_enable_findability_oriented_order(true);
-              return request;
-            }())),
+    ::testing::Combine(::testing::ValuesIn(kScenariosForExperimentParams),
+                       ::testing::Values(GetMobileRequest())),
     SessionHandlerScenarioTestForRequest::GetTestName);
 
 TEST_P(SessionHandlerScenarioTestForRequest, TestImplBase) {
   // Open the scenario file.
   const absl::StatusOr<std::string> scenario_path =
-      mozc::testing::GetSourceFile(
-          {MOZC_DICT_DIR_COMPONENTS, std::get<0>(GetParam())});
+      mozc::testing::GetSourceFile({"data", std::get<0>(GetParam())});
   ASSERT_TRUE(scenario_path.ok()) << scenario_path.status();
   handler_->ClearAll();
   handler_->SetRequest(std::get<1>(GetParam()));

@@ -42,7 +42,6 @@
 #include "absl/log/check.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
-#include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
@@ -54,6 +53,7 @@
 #include "base/util.h"
 #include "composer/composer.h"
 #include "composer/table.h"
+#include "converter/candidate.h"
 #include "converter/converter_interface.h"
 #include "converter/segments.h"
 #include "protocol/commands.pb.h"
@@ -62,6 +62,8 @@
 namespace mozc {
 namespace quality_regression {
 namespace {
+
+using converter::Candidate;
 
 constexpr char kConversionExpect[] = "Conversion Expected";
 constexpr char kConversionNotExpect[] = "Conversion Not Expected";
@@ -86,7 +88,7 @@ int GetRank(absl::string_view value, const Segments *segments,
   const Segment &seg = segments->segment(current_segment);
   int rank = 0;
   absl::flat_hash_set<absl::string_view> dedup;
-  for (const Segment::Candidate *cand : seg.candidates()) {
+  for (const Candidate *cand : seg.candidates()) {
     const std::string &cand_value = cand->value;
     const bool new_value = dedup.insert(cand_value).second;
     if (!new_value) {
@@ -95,7 +97,7 @@ int GetRank(absl::string_view value, const Segments *segments,
       continue;
     }
 
-    if (!absl::StartsWith(value, cand_value)) {
+    if (!value.starts_with(cand_value)) {
       rank++;
       continue;
     }
@@ -150,7 +152,7 @@ absl::Status QualityRegressionUtil::TestItem::ParseFromTSV(
   command.assign(tokens[3].data(), tokens[3].size());
 
   if (tokens.size() == 4) {
-    if (absl::StartsWith(command, kConversionExpect) &&
+    if (command.starts_with(kConversionExpect) &&
         command != kConversionExpect) {
       constexpr int kSize = std::size(kConversionExpect);  // Size with '\0'.
       expected_rank = NumberUtil::SimpleAtoi(command.substr(kSize));

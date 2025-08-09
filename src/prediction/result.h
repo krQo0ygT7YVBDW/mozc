@@ -33,18 +33,17 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
-#include <utility>
 #include <vector>
 
+#include "absl/base/no_destructor.h"
 #include "absl/base/nullability.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
 #include "composer/query.h"
-#include "converter/segments.h"
+#include "converter/inner_segment.h"
 #include "dictionary/dictionary_token.h"
-#include "prediction/zero_query_dict.h"
 
 namespace mozc {
 namespace prediction {
@@ -90,7 +89,6 @@ enum PredictionType {
 };
 // Bitfield to store a set of PredictionType.
 using PredictionTypes = int32_t;
-using ZeroQueryResult = std::pair<std::string, ZeroQueryType>;
 
 struct Result {
   void InitializeByTokenAndTypes(const dictionary::Token &token,
@@ -98,13 +96,15 @@ struct Result {
   void SetTypesAndTokenAttributes(
       PredictionTypes prediction_types,
       dictionary::Token::AttributesBitfield token_attr);
-  void SetSourceInfoForZeroQuery(ZeroQueryType zero_query_type);
-  bool IsUserDictionaryResult() const {
-    return (candidate_attributes & Segment::Candidate::USER_DICTIONARY) != 0;
+
+  inline static const Result &DefaultResult() {
+    static const absl::NoDestructor<Result> kResult;
+    return *kResult;
   }
 
   std::string key;
   std::string value;
+  std::string description;
   // Indicating which PredictionType creates this instance.
   // UNIGRAM, BIGRAM, REALTIME, SUFFIX, ENGLISH or TYPING_CORRECTION
   // is set exclusively.
@@ -119,8 +119,8 @@ struct Result {
   // separately from the original LM cost to perform rescoring in a rigorous
   // manner.
   int cost = 0;
-  int lid = 0;
-  int rid = 0;
+  uint16_t lid = 0;
+  uint16_t rid = 0;
   uint32_t candidate_attributes = 0;
   // Boundary information for realtime conversion.
   // This will be set only for realtime conversion result candidates.
@@ -128,13 +128,7 @@ struct Result {
   // If the candidate key and value are
   // "わたしの|なまえは|なかのです", " 私の|名前は|中野です",
   // |inner_segment_boundary| have [(4,2), (4, 3), (5, 4)].
-  std::vector<uint32_t> inner_segment_boundary;
-  // Segment::Candidate::SourceInfo.
-  // Will be used for usage stats.
-  uint32_t source_info = 0;
-  // Lookup key without expansion.
-  // Please refer to Composer for query expansion.
-  std::string non_expanded_original_key;
+  converter::InnerSegmentBoundary inner_segment_boundary;
   size_t consumed_key_size = 0;
   // The total penalty added to this result.
   int penalty = 0;
@@ -151,19 +145,29 @@ struct Result {
   std::string log;
 #endif  // NDEBUG
 
+  converter::InnerSegments inner_segments() const {
+    return converter::InnerSegments(key, value, inner_segment_boundary);
+  }
+
+  // Used to emulate positive infinity for cost. This value is set for those
+  // candidates that are thought to be aggressive; thus we can eliminate such
+  // candidates from suggestion or prediction. Note that for this purpose we
+  // don't want to use INT_MAX because someone might further add penalty after
+  // cost is set to INT_MAX, which leads to overflow and consequently aggressive
+  // candidates would appear in the top results.
+  inline static constexpr int kInvalidCost = (2 << 20);
+
   template <typename S>
   friend void AbslStringify(S &sink, const Result &r) {
     absl::Format(
         &sink,
         "key: %s, value: %s, types: %d, wcost: %d, cost: %d, cost_before: %d, "
-        "lid: %d, "
-        "rid: %d, attrs: %d, bdd: %s, srcinfo: %d, origkey: %s, "
-        "consumed_key_size: %d, penalty: %d, tc_adjustment: %d, removed: %v",
+        "lid: %d, rid: %d, attrs: %d, bdd: %s, consumed_key_size: %d, penalty: "
+        "%d, tc_adjustment: %d, removed: %v",
         r.key, r.value, r.types, r.wcost, r.cost, r.cost_before_rescoring,
         r.lid, r.rid, r.candidate_attributes,
-        absl::StrJoin(r.inner_segment_boundary, ","), r.source_info,
-        r.non_expanded_original_key, r.consumed_key_size, r.penalty,
-        r.typing_correction_adjustment, r.removed);
+        absl::StrJoin(r.inner_segment_boundary, ","), r.consumed_key_size,
+        r.penalty, r.typing_correction_adjustment, r.removed);
 #ifndef NDEBUG
     sink.Append(", log:\n");
     for (absl::string_view line : absl::StrSplit(r.log, '\n')) {
@@ -211,16 +215,21 @@ struct ResultCostLess {
 // TODO(taku): rename `query` as it is not a query.
 void PopulateTypeCorrectedQuery(
     const composer::TypeCorrectedQuery &typing_corrected_result,
-    absl::Nonnull<Result *> result);
+    Result *absl_nonnull result);
+
+// Makes debug string from `types`.
+std::string GetPredictionTypeDebugString(PredictionTypes types);
 
 #ifndef NDEBUG
-#define MOZC_WORD_LOG_MESSAGE(message) \
-  absl::StrCat(__FILE__, ":", __LINE__, " ", message, "\n")
-#define MOZC_WORD_LOG(result, message) \
-  (result).log.append(MOZC_WORD_LOG_MESSAGE(message))
+#define MOZC_WORD_LOG(result, ...)                                  \
+  {                                                                 \
+    if (!(result).log.empty()) absl::StrAppend(&(result).log, " "); \
+    absl::StrAppend(&(result).log, __FILE__, ":", __LINE__, " ",    \
+                    ##__VA_ARGS__);                                 \
+  }
 #else  // NDEBUG
-#define MOZC_WORD_LOG(result, message) \
-  {                                    \
+#define MOZC_WORD_LOG(result, ...) \
+  {                                \
   }
 #endif  // NDEBUG
 

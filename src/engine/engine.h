@@ -32,9 +32,9 @@
 
 #include <memory>
 #include <string>
-#include <utility>
 #include <vector>
 
+#include "absl/log/check.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
@@ -44,14 +44,12 @@
 #include "dictionary/user_dictionary_session_handler.h"
 #include "engine/data_loader.h"
 #include "engine/engine_converter.h"
+#include "engine/engine_converter_interface.h"
 #include "engine/engine_interface.h"
-#include "engine/minimal_converter.h"
 #include "engine/modules.h"
 #include "engine/supplemental_model_interface.h"
-#include "prediction/predictor_interface.h"
 #include "protocol/commands.pb.h"
 #include "protocol/config.pb.h"
-#include "rewriter/rewriter_interface.h"
 
 namespace mozc {
 
@@ -63,23 +61,13 @@ class Engine : public EngineInterface {
   // learning preference (to learn content word or not).  See Init() for the
   // details of implementation.
 
-  // Creates an instance with desktop configuration from a data manager.  The
-  // ownership of data manager is passed to the engine instance.
-  static absl::StatusOr<std::unique_ptr<Engine>> CreateDesktopEngine(
-      std::unique_ptr<const DataManager> data_manager);
-
-  // Creates an instance with mobile configuration from a data manager.  The
-  // ownership of data manager is passed to the engine instance.
-  static absl::StatusOr<std::unique_ptr<Engine>> CreateMobileEngine(
-      std::unique_ptr<const DataManager> data_manager);
-
   // Creates an instance from a data manager and is_mobile flag.
   static absl::StatusOr<std::unique_ptr<Engine>> CreateEngine(
-      std::unique_ptr<const DataManager> data_manager, bool is_mobile);
+      std::unique_ptr<const DataManager> data_manager);
 
   // Creates an instance with the given modules and is_mobile flag.
   static absl::StatusOr<std::unique_ptr<Engine>> CreateEngine(
-      std::unique_ptr<engine::Modules> modules, bool is_mobile);
+      std::unique_ptr<engine::Modules> modules);
 
   // Creates an engine with no initialization.
   static std::unique_ptr<Engine> CreateEngine();
@@ -107,8 +95,7 @@ class Engine : public EngineInterface {
   bool ClearUserPrediction() override;
   bool ClearUnusedUserPrediction() override;
 
-  absl::Status ReloadModules(std::unique_ptr<engine::Modules> modules,
-                             bool is_mobile);
+  absl::Status ReloadModules(std::unique_ptr<engine::Modules> modules);
 
   absl::string_view GetDataVersion() const override {
     static absl::string_view kDefaultDataVersion = "0.0.0";
@@ -150,14 +137,13 @@ class Engine : public EngineInterface {
   // For the constructor.
   friend std::unique_ptr<Engine> std::make_unique<Engine>();
 
-  // Initializes the engine object by the given modules and is_mobile flag.
-  // The is_mobile flag is used to select DefaultPredictor and MobilePredictor.
-  absl::Status Init(std::unique_ptr<engine::Modules> modules, bool is_mobile);
+  // Initializes the engine object by the given modules.
+  absl::Status Init(std::unique_ptr<engine::Modules> modules);
 
   DataLoader loader_;
 
   std::unique_ptr<engine::SupplementalModelInterface> supplemental_model_;
-  std::shared_ptr<Converter> converter_;
+  std::shared_ptr<converter::Converter> converter_;
   std::shared_ptr<ConverterInterface> minimal_converter_;
   std::unique_ptr<DataLoader::Response> loader_response_;
   // Do not initialized with Init() because the cost of initialization is

@@ -42,6 +42,7 @@
 #include "base/util.h"
 #include "composer/composer.h"
 #include "composer/table.h"
+#include "converter/candidate.h"
 #include "converter/converter_mock.h"
 #include "converter/segments.h"
 #include "converter/segments_matchers.h"
@@ -71,7 +72,7 @@ using ::testing::StrEq;
 using ::testing::Values;
 
 void InitCandidate(const absl::string_view key, const absl::string_view value,
-                   Segment::Candidate *candidate) {
+                   converter::Candidate *candidate) {
   candidate->content_key = std::string(key);
   candidate->value = std::string(value);
   candidate->content_value = std::string(value);
@@ -92,21 +93,21 @@ void InitSegment(const absl::string_view key, const absl::string_view value,
 
 void InsertCandidate(const absl::string_view key, const absl::string_view value,
                      const int position, Segment *segment) {
-  Segment::Candidate *cand = segment->insert_candidate(position);
+  converter::Candidate *cand = segment->insert_candidate(position);
   cand->content_key = std::string(key);
   cand->value = std::string(value);
   cand->content_value = std::string(value);
 }
 
-Matcher<const Segment::Candidate *> ValueIs(absl::string_view value) {
-  return Field(&Segment::Candidate::value, value);
+Matcher<const converter::Candidate *> ValueIs(absl::string_view value) {
+  return Field(&converter::Candidate::value, value);
 }
 
 // A matcher to test if a candidate has the given value and description.
-Matcher<const Segment::Candidate *> ValueAndDescAre(absl::string_view value,
-                                                    absl::string_view desc) {
-  return Pointee(AllOf(Field(&Segment::Candidate::value, value),
-                       Field(&Segment::Candidate::description, desc)));
+Matcher<const converter::Candidate *> ValueAndDescAre(absl::string_view value,
+                                                      absl::string_view desc) {
+  return Pointee(AllOf(Field(&converter::Candidate::value, value),
+                       Field(&converter::Candidate::description, desc)));
 }
 
 // An action that invokes a DictionaryInterface::Callback with the token whose
@@ -549,9 +550,10 @@ TEST_F(DateRewriterTest, ConvertDateTest) {
 TEST_F(DateRewriterTest, NumberRewriterTest) {
   Segments segments;
   DateRewriter rewriter;
+  auto table = std::make_shared<composer::Table>();
   const commands::Request request;
   const config::Config config;
-  const composer::Composer composer(request, config);
+  const composer::Composer composer(table, request, config);
   const ConversionRequest conversion_request =
       ConversionRequestBuilder().SetComposer(composer).Build();
 
@@ -881,13 +883,13 @@ TEST_F(DateRewriterTest, NumberRewriterTest) {
 
   constexpr auto ValueAndDescAre =
       [](absl::string_view value,
-         absl::string_view desc) -> Matcher<const Segment::Candidate *> {
-    return Pointee(AllOf(Field(&Segment::Candidate::value, value),
-                         Field(&Segment::Candidate::description, desc)));
+         absl::string_view desc) -> Matcher<const converter::Candidate *> {
+    return Pointee(AllOf(Field(&converter::Candidate::value, value),
+                         Field(&converter::Candidate::description, desc)));
   };
   for (const auto &test_case : kTestCases) {
     // Convert expected outputs to matchers.
-    std::vector<Matcher<const Segment::Candidate *>> matchers;
+    std::vector<Matcher<const converter::Candidate *>> matchers;
     for (const auto &[value, desc] : test_case) {
       matchers.push_back(ValueAndDescAre(value, desc));
     }
@@ -947,7 +949,7 @@ TEST_F(DateRewriterTest, NumberRewriterFromRawInputTest) {
   // In this case meta candidates should be prioritized.
   {
     InitSegment("cd", "cd", &segments);
-    Segment::Candidate *meta_candidate =
+    converter::Candidate *meta_candidate =
         segments.mutable_conversion_segment(0)->add_meta_candidate();
     meta_candidate->value = "1111";
     composer.InsertCharacter("2223");
@@ -981,9 +983,10 @@ TEST_F(DateRewriterTest, MobileEnvironmentTest) {
 }
 
 TEST_F(DateRewriterTest, ConsecutiveDigitsInsertPositionTest) {
+  auto table = std::make_shared<composer::Table>();
   commands::Request request;
   const config::Config config;
-  const composer::Composer composer(request, config);
+  const composer::Composer composer(table, request, config);
 
   // Init an instance of Segments for this test.
   Segments test_segments;
@@ -1038,9 +1041,10 @@ TEST_F(DateRewriterTest, ConsecutiveDigitsInsertPositionTest) {
 }
 
 TEST_F(DateRewriterTest, ConsecutiveDigitsFromMetaCandidates) {
-  commands::Request request;
+  auto table = std::make_shared<composer::Table>();
+  const commands::Request request;
   const config::Config config;
-  const composer::Composer composer(request, config);
+  const composer::Composer composer(table, request, config);
   const ConversionRequest conversion_request =
       ConversionRequestBuilder().SetComposer(composer).Build();
 
@@ -1056,9 +1060,10 @@ TEST_F(DateRewriterTest, ConsecutiveDigitsFromMetaCandidates) {
 }
 
 TEST_F(DateRewriterTest, ConsecutiveDigitsWithMinusSign) {
-  commands::Request request;
+  auto table = std::make_shared<composer::Table>();
+  const commands::Request request;
   const config::Config config;
-  const composer::Composer composer(request, config);
+  const composer::Composer composer(table, request, config);
   const ConversionRequest conversion_request =
       ConversionRequestBuilder().SetComposer(composer).Build();
 
@@ -1082,9 +1087,10 @@ TEST_F(DateRewriterTest, ConsecutiveDigitsWithMinusSign) {
 }
 
 TEST_F(DateRewriterTest, ConsecutiveDigitsInsertPositionWithHistory) {
-  commands::Request request;
+  auto table = std::make_shared<composer::Table>();
+  const commands::Request request;
   const config::Config config;
-  const composer::Composer composer(request, config);
+  const composer::Composer composer(table, request, config);
   const ConversionRequest conversion_request =
       ConversionRequestBuilder().SetComposer(composer).Build();
 
@@ -1166,7 +1172,7 @@ TEST_F(DateRewriterTest, ExtraFormatSyntaxTest) {
     EXPECT_TRUE(rewriter.Rewrite(request, &segments));
     ASSERT_EQ(segments.segments_size(), 1);
     EXPECT_THAT(segments.segment(0),
-                ContainsCandidate(Field(&Segment::Candidate::value, output)));
+                ContainsCandidate(Field(&converter::Candidate::value, output)));
   };
 
   syntax_test("%", "%");    // Single % (illformat)

@@ -34,6 +34,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -48,7 +49,6 @@
 #include "composer/transliterators.h"
 #include "protocol/commands.pb.h"
 #include "protocol/config.pb.h"
-#include "testing/friend_test.h"
 #include "transliteration/transliteration.h"
 
 namespace mozc {
@@ -70,10 +70,10 @@ class ComposerData {
                    compositions_for_handwriting);
 
   // Copyable and movable.
-  ComposerData(const ComposerData &other);
-  ComposerData &operator=(const ComposerData &);
-  ComposerData(ComposerData &&other) noexcept;
-  ComposerData &operator=(ComposerData &&) noexcept;
+  ComposerData(const ComposerData &other) = default;
+  ComposerData &operator=(const ComposerData &) = default;
+  ComposerData(ComposerData &&other) = default;
+  ComposerData &operator=(ComposerData &&) = default;
 
   transliteration::TransliterationType GetInputMode() const;
 
@@ -367,7 +367,7 @@ class Composer final {
   }
 
  private:
-  FRIEND_TEST(ComposerTest, ApplyTemporaryInputMode);
+  friend class ComposerTestPeer;
 
   bool ProcessCompositionInput(CompositionInput input);
 

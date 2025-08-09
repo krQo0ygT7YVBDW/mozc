@@ -41,7 +41,6 @@
 #include "absl/flags/flag.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
-#include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_join.h"
@@ -56,8 +55,8 @@
 #include "base/singleton.h"
 #include "base/system_util.h"
 #include "composer/composer.h"
-#include "composer/table.h"
 #include "config/config_handler.h"
+#include "converter/candidate.h"
 #include "converter/converter_interface.h"
 #include "converter/lattice.h"
 #include "converter/pos_id_printer.h"
@@ -103,6 +102,15 @@ ABSL_FLAG(std::string, decoder_experiment_params, "",
 namespace mozc {
 namespace {
 
+using ::mozc::converter::Candidate;
+
+int FindCandidate(const Segment &segment, absl::string_view value) {
+  for (int i = 0; i < segment.candidates_size(); ++i) {
+    if (segment.candidate(i).value == value) return i;
+  }
+  return -1;
+}
+
 // Wrapper class for pos id printing
 class PosIdPrintUtil {
  public:
@@ -147,9 +155,9 @@ std::string SegmentTypeToString(Segment::SegmentType type) {
 
 std::string CandidateAttributesToString(uint32_t attrs) {
   std::vector<std::string> v;
-#define ADD_STR(fieldname)                                              \
-  do {                                                                  \
-    if (attrs & Segment::Candidate::fieldname) v.push_back(#fieldname); \
+#define ADD_STR(fieldname)                                     \
+  do {                                                         \
+    if (attrs & Candidate::fieldname) v.push_back(#fieldname); \
   } while (false)
 
   ADD_STR(BEST_CANDIDATE);
@@ -201,13 +209,9 @@ std::string NumberStyleToString(NumberUtil::NumberString::Style style) {
 #undef RETURN_STR
 }
 
-std::string InnerSegmentBoundaryToString(const Segment::Candidate &cand) {
-  if (cand.inner_segment_boundary.empty()) {
-    return "";
-  }
+std::string InnerSegmentBoundaryToString(const Candidate &cand) {
   std::vector<std::string> pieces;
-  for (Segment::Candidate::InnerSegmentIterator iter(&cand); !iter.Done();
-       iter.Next()) {
+  for (const auto &iter : cand.inner_segments()) {
     pieces.push_back(absl::StrCat("<", iter.GetKey(), ", ", iter.GetValue(),
                                   ", ", iter.GetContentKey(), ", ",
                                   iter.GetContentValue(), ">"));
@@ -216,7 +220,7 @@ std::string InnerSegmentBoundaryToString(const Segment::Candidate &cand) {
 }
 
 void PrintCandidate(const Segment &parent, size_t candidates_size, int num,
-                    const Segment::Candidate &cand, std::ostream *os) {
+                    const Candidate &cand, std::ostream *os) {
   std::vector<std::string> lines;
   if (parent.key() != cand.key) {
     lines.push_back("key: " + cand.key);
@@ -295,12 +299,14 @@ bool ExecCommand(const ConverterInterface &converter, const std::string &line,
   ConversionRequest::Options options = {
       .max_conversion_candidates_size =
           absl::GetFlag(FLAGS_max_conversion_candidates_size),
+      .use_actual_converter_for_realtime_conversion = true,
       .create_partial_candidates = request.auto_partial_suggestion(),
   };
 
   const std::string &func = fields[0];
   if (func == "startconversion" || func == "start" || func == "s") {
     options.request_type = ConversionRequest::CONVERSION;
+    options.create_partial_candidates = false;
     CHECK_FIELDS_LENGTH(2);
     composer.SetPreeditTextForTestOnly(fields[1]);
     const ConversionRequest conversion_request =
@@ -439,6 +445,36 @@ bool ExecCommand(const ConverterInterface &converter, const std::string &line,
     config->set_history_learning_level(config::Config::NO_HISTORY);
   } else if (func == "enableuserhistory") {
     config->set_history_learning_level(config::Config::DEFAULT_HISTORY);
+  } else if (func == "zeroquerysuggest" || func == "z") {
+    CHECK_FIELDS_LENGTH(3);  // command history_key history_value
+    if (!ExecCommand(converter, "reset", request, config, segments)) {
+      LOG(ERROR) << "Reset failed";
+      return false;
+    }
+    if (!ExecCommand(converter, absl::StrFormat("predict %s", fields[1]),
+                     request, config, segments)) {
+      LOG(ERROR) << "Predict failed for context key " << fields[1];
+      return false;
+    }
+    const int index = FindCandidate(segments->conversion_segment(0), fields[2]);
+    if (index == -1) {
+      LOG(ERROR) << "Cannot find candidate " << fields[2];
+      return false;
+    }
+    if (!ExecCommand(converter, absl::StrFormat("commit 0 %d", index), request,
+                     config, segments)) {
+      LOG(ERROR) << "commit failed";
+      return false;
+    }
+    if (!ExecCommand(converter, "finish", request, config, segments)) {
+      LOG(ERROR) << "finish failed";
+      return false;
+    }
+    if (!ExecCommand(converter, "predict", request, config, segments)) {
+      LOG(ERROR) << "predict from zero query failed";
+      return false;
+    }
+    return true;
   } else {
     LOG(WARNING) << "Unknown command: " << func;
     return false;
@@ -573,12 +609,11 @@ int main(int argc, char **argv) {
 
   mozc::config::Config config = mozc::config::ConfigHandler::DefaultConfig();
   mozc::commands::Request request;
-  std::unique_ptr<mozc::Engine> engine;
+  std::unique_ptr<mozc::Engine> engine =
+      mozc::Engine::CreateEngine(*std::move(data_manager)).value();
   if (absl::GetFlag(FLAGS_engine_type) == "desktop") {
-    engine =
-        mozc::Engine::CreateDesktopEngine(*std::move(data_manager)).value();
+    // Uses the default request for desktop.
   } else if (absl::GetFlag(FLAGS_engine_type) == "mobile") {
-    engine = mozc::Engine::CreateMobileEngine(*std::move(data_manager)).value();
     mozc::request_test_util::FillMobileRequest(&request);
     config.set_use_kana_modifier_insensitive_conversion(true);
   } else {

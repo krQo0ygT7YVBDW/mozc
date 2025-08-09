@@ -44,7 +44,6 @@ package(
 mozc_win32_cc_prod_binary(
     name = "mozc_broker_main",
     srcs = ["mozc_broker_main.cc"],
-    cpu = "@platforms//cpu:x86_64",
     executable_name_map = {
         "Mozc": "mozc_broker.exe",
         "GoogleJapaneseInput": "GoogleIMEJaBroker.exe",
@@ -56,11 +55,9 @@ mozc_win32_cc_prod_binary(
     deps = [
         ":mozc_broker_resource",
         ":prelauncher",
-        "//base:crash_report_handler",
         "//base:init_mozc",
         "//base:system_util",
         "//base/win32:winmain",
-        "//config:stats_config_util",
         "@com_google_absl//absl/flags:flag",
     ],
 )

@@ -51,6 +51,8 @@ mozc_cc_library(
         "//base/strings:assign",
         "//composer",
         "//config:config_handler",
+        "//converter:inner_segment",
+        "//prediction:result",
         "//protocol:commands_cc_proto",
         "//protocol:config_cc_proto",
         "@com_google_absl//absl/base:core_headers",
@@ -66,9 +68,13 @@ mozc_cc_test(
         ":conversion_request",
         "//composer",
         "//composer:table",
+        "//converter:inner_segment",
+        "//converter:segments",
+        "//prediction:result",
         "//protocol:commands_cc_proto",
         "//protocol:config_cc_proto",
         "//testing:gunit_main",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -78,7 +84,6 @@ mozc_cc_library(
     visibility = [
         "//:__subpackages__",
         "//converter:__pkg__",
-        "//dictionary:__subpackages__",
         "//prediction:__pkg__",
         "//rewriter:__pkg__",
     ],

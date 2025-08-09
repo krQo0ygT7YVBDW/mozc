@@ -46,7 +46,6 @@
 #include "absl/strings/string_view.h"
 #include "base/config_file_stream.h"
 #include "base/file_util.h"
-#include "base/util.h"
 #include "base/vlog.h"
 #include "converter/segments.h"
 #include "protocol/config.pb.h"
@@ -168,7 +167,7 @@ class SegmentsKey {
 UserBoundaryHistoryRewriter::UserBoundaryHistoryRewriter() { Reload(); }
 
 void UserBoundaryHistoryRewriter::Finish(const ConversionRequest &request,
-                                         Segments *segments) {
+                                         const Segments &segments) {
   if (request.request_type() != ConversionRequest::CONVERSION) {
     return;
   }
@@ -189,8 +188,8 @@ void UserBoundaryHistoryRewriter::Finish(const ConversionRequest &request,
     return;
   }
 
-  if (segments->resized()) {
-    Insert(request, *segments);
+  if (segments.resized()) {
+    Insert(request, segments);
   }
 }
 
@@ -301,7 +300,7 @@ bool UserBoundaryHistoryRewriter::Reload() {
 }
 
 bool UserBoundaryHistoryRewriter::Insert(const ConversionRequest &request,
-                                         Segments &segments) {
+                                         const Segments &segments) {
   // Get the prefix of segments having FIXED_VALUE state.
   size_t target_segments_size = 0;
   for (const Segment &segment : segments.conversion_segments()) {

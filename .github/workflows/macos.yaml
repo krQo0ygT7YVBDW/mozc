@@ -13,15 +13,15 @@ concurrency:
 
 jobs:
   build_arm64:
-    # https://github.com/actions/runner-images/blob/main/images/macos/macos-14-arm64-Readme.md
-    runs-on: macos-14
+    # https://github.com/actions/runner-images/blob/main/images/macos/macos-15-arm64-Readme.md
+    runs-on: macos-15
     timeout-minutes: 60
 
     steps:
       - name: checkout
         uses: actions/checkout@v4
         with:
-          submodules: 'recursive'
+          submodules: recursive
 
       - name: Try to restore update_deps cache
         uses: actions/cache@v4
@@ -54,15 +54,15 @@ jobs:
           if-no-files-found: warn
 
   build_intel64:
-    # https://github.com/actions/runner-images/blob/main/images/macos/macos-14-arm64-Readme.md
-    runs-on: macos-14
+    # https://github.com/actions/runner-images/blob/main/images/macos/macos-15-arm64-Readme.md
+    runs-on: macos-15
     timeout-minutes: 60
 
     steps:
       - name: checkout
         uses: actions/checkout@v4
         with:
-          submodules: 'recursive'
+          submodules: recursive
 
       - name: Try to restore update_deps cache
         uses: actions/cache@v4
@@ -95,15 +95,15 @@ jobs:
           if-no-files-found: warn
 
   build_universal_binary:
-    # https://github.com/actions/runner-images/blob/main/images/macos/macos-14-arm64-Readme.md
-    runs-on: macos-14
+    # https://github.com/actions/runner-images/blob/main/images/macos/macos-15-arm64-Readme.md
+    runs-on: macos-15
     timeout-minutes: 90
 
     steps:
       - name: checkout
         uses: actions/checkout@v4
         with:
-          submodules: 'recursive'
+          submodules: recursive
 
       - name: Try to restore update_deps cache
         uses: actions/cache@v4
@@ -136,15 +136,15 @@ jobs:
           if-no-files-found: warn
 
   test:
-    # https://github.com/actions/runner-images/blob/main/images/macos/macos-14-arm64-Readme.md
-    runs-on: macos-14
+    # https://github.com/actions/runner-images/blob/main/images/macos/macos-15-arm64-Readme.md
+    runs-on: macos-15
     timeout-minutes: 60
 
     steps:
       - name: checkout
         uses: actions/checkout@v4
         with:
-          submodules: 'recursive'
+          submodules: recursive
 
       - name: Try to restore update_deps cache
         uses: actions/cache@v4
@@ -158,12 +158,6 @@ jobs:
         run: |
           python3 build_tools/update_deps.py
 
-      - name: Build Qt
-        working-directory: ./src
-        run: |
-          python3 build_tools/build_qt.py --release --confirm_license
-          echo "MOZC_QT_PATH=${PWD}/third_party/qt" >> $GITHUB_ENV
-
       - name: bazel test
         working-directory: ./src
         run: |
@@ -173,13 +167,15 @@ jobs:
   # in other jobs. Another approach would be to use "needs:".
   # https://docs.github.com/en/actions/using-jobs/using-jobs-in-a-workflow
   cache_deps:
-    # https://github.com/actions/runner-images/blob/main/images/macos/macos-14-arm64-Readme.md
-    runs-on: macos-14
+    # https://github.com/actions/runner-images/blob/main/images/macos/macos-15-arm64-Readme.md
+    runs-on: macos-15
     timeout-minutes: 15
 
     steps:
       - name: checkout
         uses: actions/checkout@v4
+        with:
+          submodules: false
 
       - name: Try to restore update_deps cache
         uses: actions/cache@v4

@@ -52,7 +52,6 @@
 #include "absl/algorithm/container.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
-#include "absl/strings/match.h"
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
@@ -68,6 +67,8 @@
 #include "base/util.h"
 #include "base/vlog.h"
 #include "composer/composer.h"
+#include "converter/attribute.h"
+#include "converter/candidate.h"
 #include "converter/segments.h"
 #include "dictionary/dictionary_interface.h"
 #include "dictionary/dictionary_token.h"
@@ -508,19 +509,19 @@ bool ExpandYear(const absl::string_view prefix, int year,
   return true;
 }
 
-std::unique_ptr<Segment::Candidate> CreateCandidate(
-    const Segment::Candidate &base_candidate, std::string value,
+std::unique_ptr<converter::Candidate> CreateCandidate(
+    const converter::Candidate &base_candidate, std::string value,
     std::string description) {
-  auto candidate = std::make_unique<Segment::Candidate>();
+  auto candidate = std::make_unique<converter::Candidate>();
   candidate->lid = base_candidate.lid;
   candidate->rid = base_candidate.rid;
   candidate->cost = base_candidate.cost;
   candidate->value = std::move(value);
   candidate->key = base_candidate.key;
   candidate->content_key = base_candidate.content_key;
-  candidate->attributes |= (Segment::Candidate::NO_LEARNING |
-                            Segment::Candidate::NO_VARIANTS_EXPANSION);
-  candidate->category = Segment::Candidate::OTHER;
+  candidate->attributes |= (converter::Attribute::NO_LEARNING |
+                            converter::Attribute::NO_VARIANTS_EXPANSION);
+  candidate->category = converter::Candidate::OTHER;
   candidate->description = std::move(description);
   return candidate;
 }
@@ -567,12 +568,12 @@ bool ExtractYearFromKey(const YearData &year_data, const absl::string_view key,
   constexpr absl::string_view kGanKey = "がん";
   constexpr absl::string_view kGanValue = "元";
 
-  if (!absl::StartsWith(key, year_data.key)) {
+  if (!key.starts_with(year_data.key)) {
     return false;
   }
 
   // Append the `kNenValue` if the `key` has the `kNenKey` suffix.
-  const bool has_suffix = absl::EndsWith(key, kNenKey);
+  const bool has_suffix = key.ends_with(kNenKey);
   *has_suffix_out = has_suffix;
 
   // key="しょうわ59ねん" -> era_year_str="59"
@@ -607,7 +608,7 @@ void EraToAdForCourt(const YearData *data, size_t size,
                          &results_and_descriptions) {
   for (size_t i = 0; i < size; ++i) {
     const YearData &year_data = data[i];
-    if (!absl::StartsWith(key, year_data.key)) {
+    if (!key.starts_with(year_data.key)) {
       continue;
     }
 
@@ -869,9 +870,9 @@ std::vector<std::string> DateRewriter::ConvertDateWithYear(uint32_t year,
 }
 
 namespace {
-absl::CivilMinute GetCivilMinuteWithDiff(int type, int diff) {
+absl::CivilMinute GetCivilMinuteWithDiff(int type, int diff,
+                                         absl::TimeZone tz) {
   const absl::Time at = Clock::GetAbslTime();
-  const absl::TimeZone &tz = Clock::GetTimeZone();
 
   if (type == DATE) {
     const absl::CivilDay c_day = absl::ToCivilDay(at, tz) + diff;
@@ -898,10 +899,10 @@ absl::CivilMinute GetCivilMinuteWithDiff(int type, int diff) {
 std::vector<std::string> GetConversions(const DateRewriter::DateData &data,
                                         const absl::string_view extra_format) {
   std::vector<std::string> results;
-  const absl::CivilMinute cm = GetCivilMinuteWithDiff(data.type, data.diff);
+  const absl::TimeZone tz = Clock::GetTimeZone();
+  const absl::CivilMinute cm = GetCivilMinuteWithDiff(data.type, data.diff, tz);
 
   if (!extra_format.empty()) {
-    const absl::TimeZone &tz = Clock::GetTimeZone();
     const absl::Time at = absl::FromCivil(cm, tz);
     results.push_back(absl::FormatTime(extra_format, at, tz));
   }
@@ -966,7 +967,7 @@ std::vector<std::string> GetConversions(const DateRewriter::DateData &data,
 bool DateRewriter::RewriteDate(Segment *segment,
                                const absl::string_view extra_format,
                                size_t &num_done_out) {
-  const std::string &key = segment->key();
+  absl::string_view key = segment->key();
   auto rit = std::find_if(std::begin(kDateData), std::end(kDateData),
                           [&key](auto data) { return key == data.key; });
   if (rit == std::end(kDateData)) {
@@ -994,8 +995,8 @@ bool DateRewriter::RewriteDate(Segment *segment,
   }
 
   // Insert words.
-  const Segment::Candidate &base_cand = segment->candidate(cand_idx);
-  std::vector<std::unique_ptr<Segment::Candidate>> candidates;
+  const converter::Candidate &base_cand = segment->candidate(cand_idx);
+  std::vector<std::unique_ptr<converter::Candidate>> candidates;
   candidates.reserve(conversions.size());
   for (std::string &conversion : conversions) {
     candidates.push_back(CreateCandidate(base_cand, std::move(conversion),
@@ -1018,11 +1019,11 @@ bool DateRewriter::RewriteEra(Segments::range segments_range,
   // * If the second segment starts with the `kNenKey`.
   Segment &segment = segments_range.front();
   absl::string_view key = segment.key();
-  const bool has_suffix = absl::EndsWith(key, kNenKey);
+  const bool has_suffix = key.ends_with(kNenKey);
   if (has_suffix) {
     key.remove_suffix(kNenKey.size());
   } else if (segments_range.size() < 2 ||
-             !absl::StartsWith(segments_range[1].key(), kNenKey)) {
+             !segments_range[1].key().starts_with(kNenKey)) {
     return false;
   }
 
@@ -1049,16 +1050,16 @@ bool DateRewriter::RewriteEra(Segments::range segments_range,
   }
 
   constexpr absl::string_view kDescription = "和暦";
-  const Segment::Candidate &base_cand = segment.candidate(0);
-  std::vector<std::unique_ptr<Segment::Candidate>> candidates;
+  const converter::Candidate &base_cand = segment.candidate(0);
+  std::vector<std::unique_ptr<converter::Candidate>> candidates;
   candidates.reserve(results.size());
   for (std::string &value : results) {
     if (has_suffix) {
       value.append(kNenValue);
     }
-    std::unique_ptr<Segment::Candidate> candidate =
+    std::unique_ptr<converter::Candidate> candidate =
         CreateCandidate(base_cand, std::move(value), std::string(kDescription));
-    candidate->attributes &= ~Segment::Candidate::NO_VARIANTS_EXPANSION;
+    candidate->attributes &= ~converter::Attribute::NO_VARIANTS_EXPANSION;
     candidates.push_back(std::move(candidate));
   }
 
@@ -1075,11 +1076,11 @@ bool DateRewriter::RewriteAd(Segments::range segments_range,
   // * If the first segment ends with the `kNenKey`, or
   // * If the second segment starts with the `kNenKey`.
   Segment *segment = &segments_range.front();
-  const std::string &key = segment->key();
-  const bool has_suffix = absl::EndsWith(key, kNenKey);
+  absl::string_view key = segment->key();
+  const bool has_suffix = key.ends_with(kNenKey);
   if (!has_suffix) {
     if (segments_range.size() < 2 ||
-        !absl::StartsWith(segments_range[1].key(), kNenKey)) {
+        !segments_range[1].key().starts_with(kNenKey)) {
       return false;
     }
   }
@@ -1095,8 +1096,8 @@ bool DateRewriter::RewriteAd(Segments::range segments_range,
     return false;
   }
 
-  const Segment::Candidate &base_cand = segment->candidate(0);
-  std::vector<std::unique_ptr<Segment::Candidate>> candidates;
+  const converter::Candidate &base_cand = segment->candidate(0);
+  std::vector<std::unique_ptr<converter::Candidate>> candidates;
   candidates.reserve(results_anddescriptions.size());
   for (auto &[result, description] : results_anddescriptions) {
     candidates.push_back(
@@ -1175,8 +1176,8 @@ DateRewriter::CheckResizeSegmentsForAd(const ConversionRequest &request,
   }
 
   ResizeSegmentsRequest resize_request = {
-    .segment_index = segment_index,
-    .segment_sizes = { segment_size, 0, 0, 0, 0, 0, 0, 0 },
+      .segment_index = segment_index,
+      .segment_sizes = {segment_size, 0, 0, 0, 0, 0, 0, 0},
   };
   return resize_request;
 }
@@ -1291,10 +1292,10 @@ bool DateRewriter::RewriteConsecutiveDigits(
 
   // The existence of segment->candidate(0) or segment->meta_candidate(0) is
   // guaranteed at the above check.
-  const Segment::Candidate &top_cand = (segment->candidates_size() > 0)
-                                           ? segment->candidate(0)
-                                           : segment->meta_candidate(0);
-  std::vector<std::unique_ptr<Segment::Candidate>> candidates;
+  const converter::Candidate &top_cand = (segment->candidates_size() > 0)
+                                             ? segment->candidate(0)
+                                             : segment->meta_candidate(0);
+  std::vector<std::unique_ptr<converter::Candidate>> candidates;
   candidates.reserve(results.size());
   for (DateCandidate &result : results) {
     candidates.push_back(CreateCandidate(top_cand, std::move(result.candidate),

@@ -73,7 +73,6 @@ mozc_cc_library(
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/types:span",
     ],
 )
@@ -168,7 +167,6 @@ mozc_cc_library(
         "//base:vlog",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/log:check",
-        "@com_google_absl//absl/numeric:bits",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
     ],
@@ -272,7 +270,6 @@ mozc_cc_library(
         "//base:file_util",
         "//base:number_util",
         "//base/container:serialized_string_array",
-        "@com_google_absl//absl/base:config",
         "@com_google_absl//absl/container:btree",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
@@ -314,13 +311,11 @@ bzl_library(
     srcs = ["mozc_data.bzl"],
     test_size = "small",
     visibility = ["//data_manager:__subpackages__"],
+    deps = ["@rules_cc//cc:core_rules"],
 )
 
 mozc_cc_library(
     name = "emoji_data",
     hdrs = ["emoji_data.h"],
-    visibility = [
-        "//dictionary:__pkg__",
-        "//rewriter:__pkg__",
-    ],
+    visibility = ["//rewriter:__pkg__"],
 )

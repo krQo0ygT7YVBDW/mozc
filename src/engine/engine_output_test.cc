@@ -37,6 +37,8 @@
 #include "absl/strings/string_view.h"
 #include "base/text_normalizer.h"
 #include "base/util.h"
+#include "converter/attribute.h"
+#include "converter/candidate.h"
 #include "converter/segments.h"
 #include "engine/candidate_list.h"
 #include "protocol/candidate_window.pb.h"
@@ -56,7 +58,7 @@ struct DummySegment {
 void FillDummySegment(const DummySegment *dummy_segments, const size_t num,
                       Segment *segment, CandidateList *candidate_list) {
   for (size_t i = 0; i < num; ++i) {
-    Segment::Candidate *cand = segment->push_back_candidate();
+    converter::Candidate *cand = segment->push_back_candidate();
     candidate_list->AddCandidate(i, dummy_segments[i].value);
     cand->value = dummy_segments[i].value;
     cand->usage_id = dummy_segments[i].usage_id;
@@ -243,12 +245,15 @@ TEST(EngineOutputTest, FillAllCandidateWords) {
                             "sub2_2", "subsub1_1", "subsub1_2"};
   constexpr size_t kValueSize = std::size(kValues);
   for (size_t i = 0; i < kValueSize; ++i) {
-    Segment::Candidate *candidate = segment.push_back_candidate();
+    converter::Candidate *candidate = segment.push_back_candidate();
     candidate->content_key = kNormalKey;
     candidate->value = kValues[i];
     candidate->description = kDescription;
     for (size_t j = 0; j < i; ++j) {
-      candidate->PushBackInnerSegmentBoundary(1, 1, 1, 1);
+      // Puts placeholder lengths.
+      // This field is used to determine the size of inner segments.
+      // TODO(taku): Stop exposing internal data structure.
+      candidate->inner_segment_boundary.push_back(1);
     }
   }
   // Set special key to ID:4 / Index:6
@@ -360,7 +365,7 @@ TEST(EngineOutputTest, FillAllCandidateWords_Attributes) {
                             "value_4"};
   constexpr size_t kValueSize = std::size(kValues);
   for (size_t i = 0; i < kValueSize; ++i) {
-    Segment::Candidate *candidate = segment.push_back_candidate();
+    converter::Candidate *candidate = segment.push_back_candidate();
     candidate->content_key = kKey;
     candidate->value = kValues[i];
 
@@ -368,16 +373,16 @@ TEST(EngineOutputTest, FillAllCandidateWords_Attributes) {
   }
 
   segment.mutable_candidate(1)->attributes =
-      Segment::Candidate::Attribute::USER_DICTIONARY;
+      converter::Attribute::USER_DICTIONARY;
   segment.mutable_candidate(2)->attributes =
-      Segment::Candidate::Attribute::USER_HISTORY_PREDICTION |
-      Segment::Candidate::Attribute::NO_VARIANTS_EXPANSION;
+      converter::Attribute::USER_HISTORY_PREDICTION |
+      converter::Attribute::NO_VARIANTS_EXPANSION;
   segment.mutable_candidate(3)->attributes =
-      Segment::Candidate::Attribute::SPELLING_CORRECTION |
-      Segment::Candidate::Attribute::NO_EXTRA_DESCRIPTION;
+      converter::Attribute::SPELLING_CORRECTION |
+      converter::Attribute::NO_EXTRA_DESCRIPTION;
   segment.mutable_candidate(4)->attributes =
-      Segment::Candidate::Attribute::TYPING_CORRECTION |
-      Segment::Candidate::Attribute::BEST_CANDIDATE;
+      converter::Attribute::TYPING_CORRECTION |
+      converter::Attribute::BEST_CANDIDATE;
 
   candidate_list.set_focused(true);
   candidate_list.MoveToId(0);
@@ -620,6 +625,53 @@ TEST(EngineOutputTest, FillUsages) {
   candidate_window_proto.Clear();
   output::FillUsages(segment, candidate_list, &candidate_window_proto);
   ASSERT_FALSE(candidate_window_proto.has_usages());
+}
+
+TEST(EngineOutputTest, FillCandidateWindowRange) {
+  Segment segment;
+  CandidateList candidate_list(true);
+  commands::CandidateWindow candidate_window_proto;
+  static const DummySegment dummy_segments[] = {
+      {"val00", 10, "title00", "desc00"}, {"val01", 11, "title01", "desc01"},
+      {"val02", 12, "title02", "desc02"}, {"val03", 13, "title03", "desc03"},
+      {"val04", 14, "title04", "desc04"}, {"val05", 15, "title05", "desc05"},
+      {"val06", 16, "title06", "desc06"}, {"val07", 17, "title07", "desc07"},
+      {"val08", 18, "title08", "desc08"}, {"val09", 19, "title09", "desc09"},
+      {"val10", 20, "title10", "desc10"}, {"val11", 21, "title11", "desc11"},
+  };
+  FillDummySegment(dummy_segments, std::size(dummy_segments), &segment,
+                   &candidate_list);
+  candidate_list.set_focused(true);
+
+  output::FillCandidateWindow(segment, candidate_list, 0,
+                              &candidate_window_proto);
+  ASSERT_EQ(candidate_window_proto.focused_index(), 0);
+  ASSERT_EQ(candidate_window_proto.size(), 12);
+  ASSERT_EQ(candidate_window_proto.candidate_size(), 9);
+  ASSERT_EQ(candidate_window_proto.candidate(0).index(), 0);
+  ASSERT_EQ(candidate_window_proto.candidate(0).id(), 0);
+  ASSERT_EQ(candidate_window_proto.candidate(0).information_id(), 10);
+  ASSERT_TRUE(candidate_window_proto.has_usages());
+  ASSERT_EQ(candidate_window_proto.usages().information_size(),
+            candidate_window_proto.candidate_size());
+  ASSERT_EQ(candidate_window_proto.usages().information(0).id(), 10);
+  ASSERT_EQ(candidate_window_proto.usages().information(0).candidate_id(0), 0);
+
+  candidate_list.MoveToId(11);
+  candidate_window_proto.Clear();
+  output::FillCandidateWindow(segment, candidate_list, 0,
+                              &candidate_window_proto);
+  ASSERT_EQ(candidate_window_proto.focused_index(), 11);
+  ASSERT_EQ(candidate_window_proto.size(), 12);
+  ASSERT_EQ(candidate_window_proto.candidate_size(), 3);
+  ASSERT_EQ(candidate_window_proto.candidate(0).index(), 9);
+  ASSERT_EQ(candidate_window_proto.candidate(0).id(), 9);
+  ASSERT_EQ(candidate_window_proto.candidate(0).information_id(), 19);
+  ASSERT_TRUE(candidate_window_proto.has_usages());
+  ASSERT_EQ(candidate_window_proto.usages().information_size(),
+            candidate_window_proto.candidate_size());
+  ASSERT_EQ(candidate_window_proto.usages().information(0).id(), 19);
+  ASSERT_EQ(candidate_window_proto.usages().information(0).candidate_id(0), 9);
 }
 
 TEST(EngineOutputTest, FillShortcuts) {
@@ -867,7 +919,7 @@ TEST(EngineOutputTest, FillAllCandidateWords_NonFocused) {
   const char *kNormalKey = "key";
   segment.set_key(kNormalKey);
 
-  Segment::Candidate *candidate = segment.push_back_candidate();
+  converter::Candidate *candidate = segment.push_back_candidate();
   candidate->content_key = "key";
   candidate->value = "value";
 
@@ -903,7 +955,7 @@ TEST(EngineOutputTest, FillRemovedCandidateWords) {
   const char *kNormalKey = "key";
   segment.set_key(kNormalKey);
 
-  Segment::Candidate candidate;
+  converter::Candidate candidate;
   candidate.content_key = "key";
   candidate.value = "value";
   segment.removed_candidates_for_debug_.push_back(candidate);

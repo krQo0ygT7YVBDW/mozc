@@ -45,8 +45,9 @@
 #include "base/number_util.h"
 #include "base/util.h"
 #include "base/vlog.h"
+#include "converter/attribute.h"
+#include "converter/candidate.h"
 #include "converter/node.h"
-#include "converter/segments.h"
 #include "dictionary/dictionary_interface.h"
 #include "dictionary/pos_matcher.h"
 #include "prediction/suggestion_filter.h"
@@ -89,12 +90,13 @@ constexpr int kMinCost = 100;
 constexpr int kCostOffset = 6907;
 constexpr int kStructureCostOffset = 3453;
 constexpr int kMinStructureCostOffset = 1151;
-constexpr int32_t kStopEnmerationCacheSize = 30;
+constexpr int32_t kStopEnumerationCacheSize = 30;
 
 // Returns true if the given node sequence is noisy weak compound.
 // Please refer to the comment in FilterCandidateInternal for the idea.
 inline bool IsNoisyWeakCompound(const absl::Span<const Node *const> nodes,
-                                const dictionary::PosMatcher &pos_matcher) {
+                                const dictionary::PosMatcher &pos_matcher,
+                                const Candidate *candidate) {
   if (nodes.size() <= 1) {
     return false;
   }
@@ -104,20 +106,35 @@ inline bool IsNoisyWeakCompound(const absl::Span<const Node *const> nodes,
   }
   if (pos_matcher.IsWeakCompoundFillerPrefix(nodes[0]->lid)) {
     // Word that starts with 'filler' is always noisy.
+    MOZC_CANDIDATE_LOG(candidate, "Noise: Word that starts with 'filler'");
     return true;
   }
   if (nodes[1]->lid != nodes[1]->rid) {
-    // Some node +  COMPOUND node may be noisy.
-    return true;
+    // If the second node is a compound word (i.e. lid != rid),
+    // it is basically filtered.
+    // However, the second node is an anti_phrase word (e.g. とともに),
+    // the node is not filtered. Since there is no direct way
+    // to determine the anti_phrase word, we use the following heuristic.
+
+    const bool is_possible_anti_phrase_connection =
+        pos_matcher.IsContentNoun(nodes[0]->rid) &&
+        pos_matcher.IsAcceptableParticleAtBeginOfSegment(nodes[1]->lid);
+    if (!is_possible_anti_phrase_connection) {
+      // Some node +  COMPOUND node may be noisy.
+      MOZC_CANDIDATE_LOG(candidate, "Noise: Some node + COMPOUND node");
+      return true;
+    }
   }
   if (pos_matcher.IsWeakCompoundNounPrefix(nodes[0]->lid) &&
       !pos_matcher.IsWeakCompoundNounSuffix(nodes[1]->lid)) {
     // Noun prefix + not noun
+    MOZC_CANDIDATE_LOG(candidate, "Noise: Noun prefix + not noun");
     return true;
   }
   if (pos_matcher.IsWeakCompoundVerbPrefix(nodes[0]->lid) &&
       !pos_matcher.IsWeakCompoundVerbSuffix(nodes[1]->lid)) {
     // Verb prefix + not verb
+    MOZC_CANDIDATE_LOG(candidate, "Noise: Verb prefix + not verb");
     return true;
   }
   return false;
@@ -126,7 +143,8 @@ inline bool IsNoisyWeakCompound(const absl::Span<const Node *const> nodes,
 // Returns true if the given node sequence is connected weak compound.
 // Please refer to the comment in FilterCandidateInternal for the idea.
 inline bool IsConnectedWeakCompound(const absl::Span<const Node *const> nodes,
-                                    const dictionary::PosMatcher &pos_matcher) {
+                                    const dictionary::PosMatcher &pos_matcher,
+                                    const Candidate *candidate) {
   if (nodes.size() <= 1) {
     return false;
   }
@@ -137,11 +155,13 @@ inline bool IsConnectedWeakCompound(const absl::Span<const Node *const> nodes,
   if (pos_matcher.IsWeakCompoundNounPrefix(nodes[0]->lid) &&
       pos_matcher.IsWeakCompoundNounSuffix(nodes[1]->lid)) {
     // Noun prefix + noun
+    MOZC_CANDIDATE_LOG(candidate, "Connected: Noun prefix + noun");
     return true;
   }
   if (pos_matcher.IsWeakCompoundVerbPrefix(nodes[0]->lid) &&
       pos_matcher.IsWeakCompoundVerbSuffix(nodes[1]->lid)) {
     // Verb prefix + verb
+    MOZC_CANDIDATE_LOG(candidate, "Connected: Verb prefix + verb");
     return true;
   }
   return false;
@@ -263,7 +283,7 @@ void CandidateFilter::Reset() {
 
 CandidateFilter::ResultType CandidateFilter::CheckRequestType(
     const ConversionRequest &request, const absl::string_view original_key,
-    const Segment::Candidate &candidate,
+    const Candidate &candidate,
     const absl::Span<const Node *const> nodes) const {
   // Filtering by the suggestion filter, which is applied only for the
   // PREDICTION and SUGGESTION modes.
@@ -321,8 +341,7 @@ CandidateFilter::ResultType CandidateFilter::CheckRequestType(
 
 CandidateFilter::ResultType CandidateFilter::FilterCandidateInternal(
     const ConversionRequest &request, const absl::string_view original_key,
-    const Segment::Candidate *candidate,
-    const absl::Span<const Node *const> top_nodes,
+    const Candidate *candidate, const absl::Span<const Node *const> top_nodes,
     const absl::Span<const Node *const> nodes) {
   DCHECK(candidate);
 
@@ -336,7 +355,7 @@ CandidateFilter::ResultType CandidateFilter::FilterCandidateInternal(
   // If the top candidate has constrained node, we skip the main body
   // of CandidateFilter, meaning that the node is not treated as the top
   // node for CandidateFilter.
-  if (candidate->attributes & Segment::Candidate::CONTEXT_SENSITIVE) {
+  if (candidate->attributes & Attribute::CONTEXT_SENSITIVE) {
     return CandidateFilter::GOOD_CANDIDATE;
   }
 
@@ -380,7 +399,7 @@ CandidateFilter::ResultType CandidateFilter::FilterCandidateInternal(
   }
 
   // Don't remove duplications if USER_DICTIONARY.
-  if (candidate->attributes & Segment::Candidate::USER_DICTIONARY) {
+  if (candidate->attributes & Attribute::USER_DICTIONARY) {
     return CandidateFilter::GOOD_CANDIDATE;
   }
 
@@ -463,9 +482,10 @@ CandidateFilter::ResultType CandidateFilter::FilterCandidateInternal(
   //   - We do not allow noisy weak compound except for the top result. Even for
   //     the top result, we will check other conditions for filtering.
   //   - We do not allow connected weak compound if the rank is low enough.
-  const bool is_noisy_weak_compound = IsNoisyWeakCompound(nodes, pos_matcher_);
+  const bool is_noisy_weak_compound =
+      IsNoisyWeakCompound(nodes, pos_matcher_, candidate);
   const bool is_connected_weak_compound =
-      IsConnectedWeakCompound(nodes, pos_matcher_);
+      IsConnectedWeakCompound(nodes, pos_matcher_, candidate);
 
   if (is_noisy_weak_compound && candidate_size >= 1) {
     MOZC_CANDIDATE_LOG(candidate, "is_noisy_weak_compound");
@@ -510,7 +530,7 @@ CandidateFilter::ResultType CandidateFilter::FilterCandidateInternal(
   // Skip this check when the conversion mode is real-time;
   // otherwise this ruins the whole sentence
   // that starts with alphabets.
-  if (!(candidate->attributes & Segment::Candidate::REALTIME_CONVERSION)) {
+  if (!(candidate->attributes & Attribute::REALTIME_CONVERSION)) {
     const bool is_top_english_t13n =
         (Util::GetScriptType(nodes[0]->key) == Util::HIRAGANA &&
          Util::IsEnglishTransliteration(nodes[0]->value));
@@ -567,7 +587,7 @@ CandidateFilter::ResultType CandidateFilter::FilterCandidateInternal(
                  << " top_structure_cost=" << top_structure_cost
                  << " structure_cost=" << candidate->structure_cost
                  << " lid=" << candidate->lid << " rid=" << candidate->rid;
-    if (candidate_size < kStopEnmerationCacheSize) {
+    if (candidate_size < kStopEnumerationCacheSize) {
       // Even when the current candidate is classified as bad candidate,
       // we don't return STOP_ENUMERATION here.
       // When the current candidate is removed only with the "structure_cost",
@@ -638,8 +658,7 @@ CandidateFilter::ResultType CandidateFilter::FilterCandidateInternal(
 
 CandidateFilter::ResultType CandidateFilter::FilterCandidate(
     const ConversionRequest &request, const absl::string_view original_key,
-    const Segment::Candidate *candidate,
-    const absl::Span<const Node *const> top_nodes,
+    const Candidate *candidate, const absl::Span<const Node *const> top_nodes,
     const absl::Span<const Node *const> nodes) {
   if (request.request_type() == ConversionRequest::REVERSE_CONVERSION) {
     // In reverse conversion, only remove duplicates because the filtering

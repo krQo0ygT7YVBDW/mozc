@@ -30,9 +30,13 @@
 #ifndef MOZC_REQUEST_CONVERSION_REQUEST_H_
 #define MOZC_REQUEST_CONVERSION_REQUEST_H_
 
+#include <algorithm>
 #include <cstddef>
+#include <memory>
 #include <string>
+#include <type_traits>
 #include <utility>
+#include <vector>
 
 #include "absl/base/attributes.h"
 #include "absl/log/check.h"
@@ -41,6 +45,8 @@
 #include "base/util.h"
 #include "composer/composer.h"
 #include "config/config_handler.h"
+#include "converter/inner_segment.h"
+#include "prediction/result.h"
 #include "protocol/commands.pb.h"
 #include "protocol/config.pb.h"
 
@@ -149,16 +155,13 @@ class ConversionRequest {
     // of possible hiragana.
   };
 
+  // Options must be trivially copyable to get hash value directly.
   struct Options {
     RequestType request_type = CONVERSION;
 
     // Which composer's method to use for conversion key; see the comment around
     // the definition of ComposerKeySelection above.
     ComposerKeySelection composer_key_selection = CONVERSION_KEY;
-
-    // Key used for conversion.
-    // This is typically a Hiragana text to be converted to Kanji words.
-    std::string key;
 
     int max_conversion_candidates_size = kMaxConversionCandidatesSize;
     int max_user_history_prediction_candidates_size = 3;
@@ -198,6 +201,9 @@ class ConversionRequest {
     bool incognito_mode = false;
   };
 
+  static_assert(std::is_trivially_copyable<Options>::value,
+                "Options must be trivially copyable");
+
   // Default constructor stores the view.
   // All default variable returns global reference.
   ConversionRequest()
@@ -205,6 +211,7 @@ class ConversionRequest {
         request_(commands::Request::default_instance()),
         context_(commands::Context::default_instance()),
         config_(config::ConfigHandler::DefaultConfig()),
+        history_result_(prediction::Result::DefaultResult()),
         options_(Options()) {}
 
   ConversionRequest(const ConversionRequest &) = default;
@@ -248,6 +255,10 @@ class ConversionRequest {
   const Options &options() const ABSL_ATTRIBUTE_LIFETIME_BOUND {
     return options_;
   }
+  const prediction::Result &history_result() const
+      ABSL_ATTRIBUTE_LIFETIME_BOUND {
+    return *history_result_;
+  }
 
   // TODO(noriyukit): Remove these methods after removing skip_slow_rewriters_
   // flag.
@@ -258,6 +269,8 @@ class ConversionRequest {
            config_->use_kana_modifier_insensitive_conversion() &&
            options_.kana_modifier_insensitive_conversion;
   }
+
+  bool IsZeroQuerySuggestion() const { return key().empty(); }
 
   size_t max_conversion_candidates_size() const {
     return options_.max_conversion_candidates_size;
@@ -287,9 +300,27 @@ class ConversionRequest {
            request_->is_incognito_mode();
   }
 
-  absl::string_view key() const ABSL_ATTRIBUTE_LIFETIME_BOUND {
-    return options_.key;
+  absl::string_view key() const ABSL_ATTRIBUTE_LIFETIME_BOUND { return key_; }
+
+  // Takes the last `size` history key. return all value when size = -1.
+  absl::string_view converter_history_key(int size = -1) const {
+    return history_result_->inner_segments().GetSuffixKeyAndValue(size).first;
   }
+
+  // Takes the last `size` history value. return all value when size = -1.
+  absl::string_view converter_history_value(int size = -1) const {
+    return history_result_->inner_segments().GetSuffixKeyAndValue(size).second;
+  }
+
+  size_t converter_history_size() const {
+    return history_result_->inner_segments().size();
+  }
+
+  // Returns the right context id of the history.
+  int converter_history_rid() const { return history_result_->rid; }
+
+  // Returns the cost of the history if defined.
+  int converter_history_cost() const { return history_result_->cost; }
 
   // Builder can access the private member for construction.
   friend class ConversionRequestBuilder;
@@ -308,8 +339,15 @@ class ConversionRequest {
   // Input config.
   internal::copy_or_view_ptr<const config::Config> config_;
 
+  // Left context history.
+  internal::copy_or_view_ptr<const prediction::Result> history_result_;
+
   // Options for conversion request.
   Options options_;
+
+  // Key used for conversion.
+  // This is typically a Hiragana text to be converted to Kanji words.
+  std::string key_;
 };
 
 class ConversionRequestBuilder {
@@ -319,12 +357,11 @@ class ConversionRequestBuilder {
     // NOTE: Specifying Composer is preferred over specifying key directly.
     DCHECK_LE(stage_, 3);
     stage_ = 100;
-    if (request_.options_.key.empty()) {
-      request_.options_.key =
+    if (request_.key_.empty()) {
+      request_.key_ =
           GetKey(*request_.composer_data_, request_.options_.request_type,
                  request_.options_.composer_key_selection);
     }
-
     return request_;
   }
 
@@ -339,7 +376,9 @@ class ConversionRequestBuilder {
     request_.request_ = base_convreq.request_;
     request_.context_ = base_convreq.context_;
     request_.config_ = base_convreq.config_;
+    request_.history_result_ = base_convreq.history_result_;
     request_.options_ = base_convreq.options_;
+    request_.key_ = base_convreq.key_;
     return *this;
   }
   ConversionRequestBuilder &SetConversionRequestView(
@@ -352,6 +391,8 @@ class ConversionRequestBuilder {
     request_.context_.set_view(*base_convreq.context_);
     request_.config_.set_view(*base_convreq.config_);
     request_.options_ = base_convreq.options_;
+    request_.key_ = base_convreq.key_;
+    request_.history_result_.set_view(*base_convreq.history_result_);
     return *this;
   }
   ConversionRequestBuilder &SetComposerData(
@@ -406,6 +447,23 @@ class ConversionRequestBuilder {
     request_.config_.set_view(config);
     return *this;
   }
+  ConversionRequestBuilder &SetHistoryResult(
+      const prediction::Result &history_result) {
+    DCHECK_LE(stage_, 2);
+    stage_ = 2;
+    request_.history_result_.copy_from(history_result);
+    return *this;
+  }
+  ConversionRequestBuilder &SetHistoryResultView(
+      const prediction::Result &history_result ABSL_ATTRIBUTE_LIFETIME_BOUND) {
+    DCHECK_LE(stage_, 2);
+    stage_ = 2;
+    request_.history_result_.set_view(history_result);
+    return *this;
+  }
+  ConversionRequestBuilder &SetEmptyHistoryResult() {
+    return SetHistoryResultView(prediction::Result::DefaultResult());
+  }
   ConversionRequestBuilder &SetOptions(ConversionRequest::Options &&options) {
     DCHECK_LE(stage_, 2);
     stage_ = 2;
@@ -424,13 +482,13 @@ class ConversionRequestBuilder {
   ConversionRequestBuilder &SetKey(absl::string_view key) {
     DCHECK_LE(stage_, 3);
     stage_ = 3;
-    strings::Assign(request_.options_.key, key);
+    strings::Assign(request_.key_, key);
     return *this;
   }
 
  private:
-  // Remove unnecessary but potentially large options for ConversionRequest from
-  // Config and return it.
+  // Remove unnecessary but potentially large options for ConversionRequest
+  // from Config and return it.
   // TODO(b/365909808): Move this method to Session after updating the
   // ConversionRequest constructor.
   static config::Config TrimConfig(const config::Config &base_config) {

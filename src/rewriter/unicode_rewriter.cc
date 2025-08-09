@@ -34,19 +34,18 @@
 #include <limits>
 #include <optional>
 #include <string>
-#include <utility>
 
 #include "absl/algorithm/container.h"
 #include "absl/log/check.h"
 #include "absl/strings/ascii.h"
-#include "absl/strings/match.h"
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
 #include "base/util.h"
 #include "composer/composer.h"
-#include "converter/converter_interface.h"
+#include "converter/attribute.h"
+#include "converter/candidate.h"
 #include "converter/segments.h"
 #include "request/conversion_request.h"
 #include "rewriter/rewriter_interface.h"
@@ -60,7 +59,7 @@ bool IsValidCodepointExpression(const absl::string_view input) {
     return false;
   }
 
-  if (!absl::StartsWith(input, "U+")) {
+  if (!input.starts_with("U+")) {
     return false;
   }
   return absl::c_all_of(input.substr(2),
@@ -74,7 +73,7 @@ bool UCS4ExpressionToInteger(const absl::string_view input,
   return absl::SimpleHexAtoi(input.substr(2), codepoint);
 }
 
-void AddCandidate(std::string key, std::string value, int index,
+void AddCandidate(absl::string_view key, absl::string_view value, int index,
                   Segment *segment) {
   DCHECK(segment);
 
@@ -82,20 +81,20 @@ void AddCandidate(std::string key, std::string value, int index,
     index = segment->candidates_size();
   }
 
-  Segment::Candidate *candidate = segment->insert_candidate(index);
+  converter::Candidate *candidate = segment->insert_candidate(index);
   DCHECK(candidate);
 
   segment->set_key(key);
-  candidate->key = std::move(key);
+  candidate->key = key;
   candidate->value = value;
-  candidate->content_value = std::move(value);
+  candidate->content_value = value;
   candidate->description = absl::StrCat("Unicode 変換 (", candidate->key, ")");
   // NO_MODIFICATION is required here, in order to escape
   // EnvironmentalFilterRewriter. Otherwise, some candidates from
   // UnicodeRewriter will be removed because they are unrenderable.
-  candidate->attributes |= (Segment::Candidate::NO_LEARNING |
-                            Segment::Candidate::NO_VARIANTS_EXPANSION |
-                            Segment::Candidate::NO_MODIFICATION);
+  candidate->attributes |= (converter::Attribute::NO_LEARNING |
+                            converter::Attribute::NO_VARIANTS_EXPANSION |
+                            converter::Attribute::NO_MODIFICATION);
 }
 }  // namespace
 
@@ -119,9 +118,9 @@ bool UnicodeRewriter::RewriteToUnicodeCharFormat(
   const char32_t codepoint = Util::Utf8ToCodepoint(source_char);
   std::string value = absl::StrFormat("U+%04X", codepoint);
 
-  const std::string &key = segments->conversion_segment(0).key();
+  absl::string_view key = segments->conversion_segment(0).key();
   Segment *segment = segments->mutable_conversion_segment(0);
-  AddCandidate(key, std::move(value), 5, segment);
+  AddCandidate(key, value, 5, segment);
   return true;
 }
 
@@ -191,7 +190,7 @@ bool UnicodeRewriter::RewriteFromUnicodeCharFormat(
   }
 
   Segment *segment = segments->mutable_conversion_segment(0);
-  AddCandidate(std::string(key), std::move(value.value()), 0, segment);
+  AddCandidate(key, value.value(), 0, segment);
   return true;
 }
 

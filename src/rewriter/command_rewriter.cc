@@ -38,6 +38,8 @@
 #include "absl/log/check.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
+#include "converter/attribute.h"
+#include "converter/candidate.h"
 #include "converter/segments.h"
 #include "protocol/config.pb.h"
 #include "request/conversion_request.h"
@@ -79,16 +81,16 @@ bool FindString(const absl::string_view query,
   return absl::c_find(values, query) != values.end();
 }
 
-Segment::Candidate *InsertCommandCandidate(Segment *segment,
-                                           size_t reference_pos,
-                                           size_t insert_pos) {
+converter::Candidate *InsertCommandCandidate(Segment *segment,
+                                             size_t reference_pos,
+                                             size_t insert_pos) {
   DCHECK(segment);
-  Segment::Candidate *candidate = segment->insert_candidate(
+  converter::Candidate *candidate = segment->insert_candidate(
       std::min(segment->candidates_size(), insert_pos));
   DCHECK(candidate);
   *candidate = segment->candidate(reference_pos);
-  candidate->attributes |= Segment::Candidate::COMMAND_CANDIDATE;
-  candidate->attributes |= Segment::Candidate::NO_LEARNING;
+  candidate->attributes |= converter::Attribute::COMMAND_CANDIDATE;
+  candidate->attributes |= converter::Attribute::NO_LEARNING;
   candidate->description = kDescription;
   candidate->prefix = kPrefix;
   candidate->suffix = kSuffix;
@@ -106,15 +108,15 @@ bool IsSuggestionEnabled(const config::Config &config) {
 void CommandRewriter::InsertIncognitoModeToggleCommand(
     const config::Config &config, Segment *segment, size_t reference_pos,
     size_t insert_pos) const {
-  Segment::Candidate *candidate =
+  converter::Candidate *candidate =
       InsertCommandCandidate(segment, reference_pos, insert_pos);
   DCHECK(candidate);
   if (config.incognito_mode()) {
     candidate->value = kIncoginitoModeOff;
-    candidate->command = Segment::Candidate::DISABLE_INCOGNITO_MODE;
+    candidate->command = converter::Candidate::DISABLE_INCOGNITO_MODE;
   } else {
     candidate->value = kIncoginitoModeOn;
-    candidate->command = Segment::Candidate::ENABLE_INCOGNITO_MODE;
+    candidate->command = converter::Candidate::ENABLE_INCOGNITO_MODE;
   }
   candidate->content_value = candidate->value;
 }
@@ -126,16 +128,16 @@ void CommandRewriter::InsertDisableAllSuggestionToggleCommand(
     return;
   }
 
-  Segment::Candidate *candidate =
+  converter::Candidate *candidate =
       InsertCommandCandidate(segment, reference_pos, insert_pos);
 
   DCHECK(candidate);
   if (config.presentation_mode()) {
     candidate->value = kDisableAllSuggestionOff;
-    candidate->command = Segment::Candidate::DISABLE_PRESENTATION_MODE;
+    candidate->command = converter::Candidate::DISABLE_PRESENTATION_MODE;
   } else {
     candidate->value = kDisableAllSuggestionOn;
-    candidate->command = Segment::Candidate::ENABLE_PRESENTATION_MODE;
+    candidate->command = converter::Candidate::ENABLE_PRESENTATION_MODE;
   }
   candidate->content_value = candidate->value;
 }
@@ -145,7 +147,7 @@ bool CommandRewriter::RewriteSegment(const config::Config &config,
   DCHECK(segment);
 
   for (size_t i = 0; i < segment->candidates_size(); ++i) {
-    const std::string &value = segment->candidate(i).value;
+    absl::string_view value = segment->candidate(i).value;
     if (FindString(value, kCommandValues)) {
       // insert command candidate at an fixed position.
       InsertDisableAllSuggestionToggleCommand(config, segment, i, 6);
@@ -173,7 +175,7 @@ bool CommandRewriter::Rewrite(const ConversionRequest &request,
 
   Segment *segment = segments->mutable_conversion_segment(0);
   DCHECK(segment);
-  const std::string &key = segment->key();
+  absl::string_view key = segment->key();
 
   // TODO(taku): we want to replace the linear search with STL map when
   // kTriggerKeys become bigger.

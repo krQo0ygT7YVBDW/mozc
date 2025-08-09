@@ -40,10 +40,8 @@
 #include <utility>
 #include <vector>
 
-#include "absl/algorithm/container.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
-#include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "base/text_normalizer.h"
@@ -51,6 +49,8 @@
 #include "base/vlog.h"
 #include "composer/composer.h"
 #include "config/config_handler.h"
+#include "converter/attribute.h"
+#include "converter/candidate.h"
 #include "converter/converter_interface.h"
 #include "converter/segments.h"
 #include "engine/candidate_list.h"
@@ -91,12 +91,6 @@ absl::string_view GetCandidateShortcuts(
       break;
   }
   return shortcut;
-}
-
-bool HasExperimentalFeature(const commands::Context &context,
-                            absl::string_view key) {
-  return absl::c_any_of(context.experimental_features(),
-                        [=](absl::string_view f) { return f == key; });
 }
 
 // Calculate cursor offset for committed text.
@@ -220,7 +214,7 @@ Attributes GetT13nAttributes(const transliteration::TransliterationType type) {
       attributes = (FULL_WIDTH | KATAKANA);
       break;
     case transliteration::HALF_ASCII:  // "ascII"
-      attributes = (HALF_WIDTH | ASCII);
+      attributes = (HALF_WIDTH | ASCII | ASIS);
       break;
     case transliteration::HALF_ASCII_UPPER:  // "ASCII"
       attributes = (HALF_WIDTH | ASCII | UPPER);
@@ -232,7 +226,7 @@ Attributes GetT13nAttributes(const transliteration::TransliterationType type) {
       attributes = (HALF_WIDTH | ASCII | CAPITALIZED);
       break;
     case transliteration::FULL_ASCII:  // "ａｓｃＩＩ"
-      attributes = (FULL_WIDTH | ASCII);
+      attributes = (FULL_WIDTH | ASCII | ASIS);
       break;
     case transliteration::FULL_ASCII_UPPER:  // "ＡＳＣＩＩ"
       attributes = (FULL_WIDTH | ASCII | UPPER);
@@ -251,6 +245,79 @@ Attributes GetT13nAttributes(const transliteration::TransliterationType type) {
       break;
   }
   return attributes;
+}
+
+// Cycles ASCII (= Alphanumeric) cases to ASIS → UPPER → LOWER → CAPITALIZED.
+// example:
+//   "moZc": moZc (ASIS) → MOZC (UPPER) → mozc (LOWER) → Mozc (CAPITALIZED) →
+//           moZc (ASIS) → ...
+//
+// If UPPER, LOWER, or CAPITALIZED is the same as ASIS, skip it and cycle to the
+// next case.
+// example:
+//   "mozc": mozc (ASIS | LOWER) → MOZC (UPPER) → Mozc (CAPITALIZED) →
+//           mozc (ASIS | LOWER) →
+//   "MOZC": MOZC (ASIS | UPPER) → mozc (LOWER) → Mozc (CAPITALIZED) →
+//           MOZC (ASIS | UPPER) →
+//   "m": m (ASIS | LOWER) → M (UPPER | CAPACALIZED) → m (ASIS | LOWER) →
+//   "M": M (ASIS | UPPER | CAPACALIZED) → m (LOWER) →
+//        M (ASIS | UPPER | CAPACALIZED) →
+void CycleAlphaCase(Attributes query_attr, CandidateList &candidate_list) {
+  Attributes current_attr =
+      candidate_list.GetDeepestFocusedCandidate().attributes();
+
+  // If the current case is same as the user typed, move to the next case.
+  if (current_attr & ASIS) {
+    // The next case is basically UPPER.
+    // However, if the ASIS is also UPPER, skip it and move to the LOWER case.
+    query_attr |= ((current_attr & UPPER) ? LOWER : UPPER);
+    candidate_list.MoveNextAttributes(query_attr);
+    return;
+  }
+
+  // Move to the next case. If the next case is also ASIS, skip it as it's
+  // already cycled before.
+  // Try up to 3 times as there are 4 cases and avoid infinite loop.
+  const Attributes base_query_attr = query_attr;
+  for (int i = 0; i < 3; ++i) {
+    // Set query_attr to the next case and move it.
+    if (current_attr & UPPER) {
+      query_attr = base_query_attr | LOWER;
+    } else if (current_attr & LOWER) {
+      query_attr = base_query_attr | CAPITALIZED;
+    } else if (current_attr & CAPITALIZED) {
+      query_attr = base_query_attr | ASIS;
+    } else {  // nothing.
+      query_attr = base_query_attr | UPPER;
+    }
+    candidate_list.MoveNextAttributes(query_attr);
+
+    // If the next case is intentional ASIS, no need to skip it.
+    if (query_attr & ASIS) {
+      break;
+    }
+
+    const Attributes new_attr =
+        candidate_list.GetDeepestFocusedCandidate().attributes();
+
+    // If the next case is not ASIS, no need to skip it.
+    if (!(new_attr & ASIS)) {
+      break;
+    }
+
+    // This checks an edge case. Even if the next case is also ASIS,
+    // but the next case is only available case, we should not skip it.
+    // If all possible attributes are covered by the current and next cases,
+    // it means the next case is only available case.
+    const Attributes sum_attr = new_attr | current_attr;
+    if ((sum_attr & ASIS) && (sum_attr & UPPER) && (sum_attr & LOWER) &&
+        (sum_attr & CAPITALIZED)) {
+      break;
+    }
+
+    // The new case also contains ASIS, skip it and get the next case.
+    current_attr = new_attr;
+  }
 }
 }  // namespace
 
@@ -289,19 +356,33 @@ bool EngineConverter::ConvertToTransliteration(
     }
 
     DCHECK(CheckState(CONVERSION));
+
+    // The initial transliteration to ASCII is always as-is case.
+    // e.g. もZc → moZc
+    if (query_attr & ASCII) {
+      query_attr |= ASIS;
+    }
     candidate_list_.MoveToAttributes(query_attr);
   } else {
     DCHECK(CheckState(CONVERSION));
-    const Attributes current_attr =
+    Attributes current_attr =
         candidate_list_.GetDeepestFocusedCandidate().attributes();
+    const Attributes common_attr = current_attr & query_attr;
 
-    if ((query_attr & current_attr & ASCII) &&
+    // Transliterations among half-width and full-width will keep the case.
+    // e.g. Mozc → Ｍｏｚｃ
+    if ((common_attr & ASCII) &&
         ((((query_attr & HALF_WIDTH) && (current_attr & FULL_WIDTH))) ||
          (((query_attr & FULL_WIDTH) && (current_attr & HALF_WIDTH))))) {
-      query_attr |= (current_attr & (UPPER | LOWER | CAPITALIZED));
+      query_attr |= (current_attr & (UPPER | LOWER | CAPITALIZED | ASIS));
     }
 
-    candidate_list_.MoveNextAttributes(query_attr);
+    if ((common_attr & ASCII) &&
+        ((common_attr & HALF_WIDTH) || (common_attr & FULL_WIDTH))) {
+      CycleAlphaCase(query_attr, candidate_list_);
+    } else {
+      candidate_list_.MoveNextAttributes(query_attr);
+    }
   }
   candidate_list_visible_ = false;
   // Treat as top conversion candidate on usage stats.
@@ -359,8 +440,10 @@ bool EngineConverter::SwitchKanaType(const composer::Composer &composer) {
     // converter/converter.cc to enable to accept mozc::Segment::FIXED
     // from the session layer.
     if (segments_.conversion_segments_size() != 1) {
-      std::string composition;
-      GetPreedit(0, segments_.conversion_segments_size(), &composition);
+      uint8_t offset = 0;
+      for (size_t i = 0; i < segments_.conversion_segments_size(); ++i) {
+        offset += segments_.conversion_segment(i).key_len();
+      }
       DCHECK(request_);
       DCHECK(config_);
       const ConversionRequest conversion_request =
@@ -369,9 +452,8 @@ bool EngineConverter::SwitchKanaType(const composer::Composer &composer) {
               .SetRequestView(*request_)
               .SetConfigView(*config_)
               .Build();
-
-      if (!converter_->ResizeSegment(&segments_, conversion_request, 0,
-                                     Util::CharsLen(composition))) {
+      if (!converter_->ResizeSegments(&segments_, conversion_request, 0,
+                                      {offset})) {
         LOG(WARNING) << "ResizeSegment failed for segments.";
         DLOG(WARNING) << segments_.DebugString();
       }
@@ -567,28 +649,25 @@ bool EngineConverter::PredictWithPreferences(
   segments_.clear_conversion_segments();
 
   if (predict_expand || predict_first) {
-    if (!converter_->StartPrediction(conversion_request, &segments_)) {
-      LOG(WARNING) << "StartPrediction() failed";
-      // TODO(komatsu): Perform refactoring after checking the stability test.
-      //
+    const bool result = converter_->StartPredictionWithPreviousSuggestion(
+        conversion_request, previous_suggestions_, &segments_);
+    if (!result && predict_first) {
+      // Returns false if we failed at the first prediction.
       // If predict_expand is true, it means we have prevous_suggestions_.
       // So we can use it as the result of this prediction.
-      if (predict_first) {
-        ResetState();
-        return false;
-      }
+      ResetState();
+      return false;
     }
+  } else {
+    converter_->PrependCandidates(conversion_request, previous_suggestions_,
+                                  &segments_);
   }
-
-  // Merge suggestions and prediction
-  segments_.PrependCandidates(previous_suggestions_);
 
   segment_index_ = 0;
   state_ = PREDICTION;
   UpdateCandidateList();
   candidate_list_visible_ = true;
   InitializeSelectedCandidateIndices();
-
   return true;
 }
 
@@ -665,6 +744,7 @@ void EngineConverter::Commit(const composer::Composer &composer,
                                                    .SetComposer(composer)
                                                    .SetRequestView(*request_)
                                                    .SetContextView(context)
+                                                   .SetConfigView(*config_)
                                                    .Build();
   converter_->FinishConversion(conversion_request, &segments_);
   ResetState();
@@ -719,6 +799,7 @@ bool EngineConverter::CommitSuggestionInternal(
                                                      .SetComposer(composer)
                                                      .SetRequestView(*request_)
                                                      .SetContextView(context)
+                                                     .SetConfigView(*config_)
                                                      .Build();
     converter_->FinishConversion(conversion_request, &segments_);
     DCHECK_EQ(0, segments_.conversion_segments_size());
@@ -850,6 +931,7 @@ void EngineConverter::CommitPreedit(const composer::Composer &composer,
           .SetComposer(composer)
           .SetRequestView(*request_)
           .SetContextView(context)
+          .SetConfigView(*config_)
           .SetOptions(std::move(options))
           .Build();
   converter_->FinishConversion(conversion_request, &segments_);
@@ -952,6 +1034,7 @@ void EngineConverter::ResizeSegmentWidth(const composer::Composer &composer,
   const ConversionRequest conversion_request = ConversionRequestBuilder()
                                                    .SetComposer(composer)
                                                    .SetRequestView(*request_)
+                                                   .SetConfigView(*config_)
                                                    .Build();
   if (!converter_->ResizeSegment(&segments_, conversion_request, segment_index_,
                                  delta)) {
@@ -1086,30 +1169,30 @@ void EngineConverter::SetCandidateListVisible(bool visible) {
 void EngineConverter::PopOutput(const composer::Composer &composer,
                                 commands::Output *output) {
   FillOutput(composer, output);
-  updated_command_ = Segment::Candidate::DEFAULT_COMMAND;
+  updated_command_ = converter::Candidate::DEFAULT_COMMAND;
   ResetResult();
 }
 
 namespace {
-void MaybeFillConfig(Segment::Candidate::Command command,
+void MaybeFillConfig(converter::Candidate::Command command,
                      const config::Config &base_config,
                      commands::Output *output) {
-  if (command == Segment::Candidate::DEFAULT_COMMAND) {
+  if (command == converter::Candidate::DEFAULT_COMMAND) {
     return;
   }
 
   *output->mutable_config() = base_config;
   switch (command) {
-    case Segment::Candidate::ENABLE_INCOGNITO_MODE:
+    case converter::Candidate::ENABLE_INCOGNITO_MODE:
       output->mutable_config()->set_incognito_mode(true);
       break;
-    case Segment::Candidate::DISABLE_INCOGNITO_MODE:
+    case converter::Candidate::DISABLE_INCOGNITO_MODE:
       output->mutable_config()->set_incognito_mode(false);
       break;
-    case Segment::Candidate::ENABLE_PRESENTATION_MODE:
+    case converter::Candidate::ENABLE_PRESENTATION_MODE:
       output->mutable_config()->set_presentation_mode(true);
       break;
-    case Segment::Candidate::DISABLE_PRESENTATION_MODE:
+    case converter::Candidate::DISABLE_PRESENTATION_MODE:
       output->mutable_config()->set_presentation_mode(false);
       break;
     default:
@@ -1278,19 +1361,13 @@ void EngineConverter::UpdateResultTokens(const size_t index,
 
   for (size_t i = index; i < size; ++i) {
     const int cand_idx = GetCandidateIndexForConverter(i);
-    const Segment::Candidate &candidate =
+    const converter::Candidate &candidate =
         segments_.conversion_segment(i).candidate(cand_idx);
     const int first_token_idx = result_.tokens_size();
 
-    if (Segment::Candidate::InnerSegmentIterator it(&candidate); !it.Done()) {
-      // If the candidate has inner segments, fill them to the result tokens.
-      for (; !it.Done(); it.Next()) {
-        add_tokens(it.GetContentKey(), it.GetContentValue(),
-                   it.GetFunctionalKey(), it.GetFunctionalValue());
-      }
-    } else {
-      add_tokens(candidate.content_key, candidate.content_value,
-                 candidate.functional_key(), candidate.functional_value());
+    for (const auto &it : candidate.inner_segments()) {
+      add_tokens(it.GetContentKey(), it.GetContentValue(),
+                 it.GetFunctionalKey(), it.GetFunctionalValue());
     }
     // Set lid and rid to the first and last tokens respectively.
     // Other lids and rids are filled with the default POS (i.e. -1 as unknown).
@@ -1310,8 +1387,8 @@ size_t EngineConverter::GetConsumedPreeditSize(const size_t index,
     DCHECK_EQ(1, size);
     const Segment &segment = segments_.conversion_segment(0);
     const int id = GetCandidateIndexForConverter(0);
-    const Segment::Candidate &candidate = segment.candidate(id);
-    return (candidate.attributes & Segment::Candidate::PARTIALLY_KEY_CONSUMED)
+    const converter::Candidate &candidate = segment.candidate(id);
+    return (candidate.attributes & converter::Attribute::PARTIALLY_KEY_CONSUMED)
                ? candidate.consumed_key_size
                : kConsumedAllCharacters;
   }
@@ -1320,10 +1397,10 @@ size_t EngineConverter::GetConsumedPreeditSize(const size_t index,
   size_t result = 0;
   for (size_t i = index; i < size; ++i) {
     const int id = GetCandidateIndexForConverter(i);
-    const Segment::Candidate &candidate =
+    const converter::Candidate &candidate =
         segments_.conversion_segment(i).candidate(id);
     DCHECK(
-        !(candidate.attributes & Segment::Candidate::PARTIALLY_KEY_CONSUMED));
+        !(candidate.attributes & converter::Attribute::PARTIALLY_KEY_CONSUMED));
     result += segments_.conversion_segment(i).key_len();
   }
   return result;
@@ -1335,17 +1412,17 @@ bool EngineConverter::MaybePerformCommandCandidate(const size_t index,
   // instead of Commit after executing the specified action.
   for (size_t i = index; i < size; ++i) {
     const int id = GetCandidateIndexForConverter(i);
-    const Segment::Candidate &candidate =
+    const converter::Candidate &candidate =
         segments_.conversion_segment(i).candidate(id);
-    if (candidate.attributes & Segment::Candidate::COMMAND_CANDIDATE) {
+    if (candidate.attributes & converter::Candidate::COMMAND_CANDIDATE) {
       switch (candidate.command) {
-        case Segment::Candidate::DEFAULT_COMMAND:
+        case converter::Candidate::DEFAULT_COMMAND:
           // Do nothing
           break;
-        case Segment::Candidate::ENABLE_INCOGNITO_MODE:
-        case Segment::Candidate::DISABLE_INCOGNITO_MODE:
-        case Segment::Candidate::ENABLE_PRESENTATION_MODE:
-        case Segment::Candidate::DISABLE_PRESENTATION_MODE:
+        case converter::Candidate::ENABLE_INCOGNITO_MODE:
+        case converter::Candidate::DISABLE_INCOGNITO_MODE:
+        case converter::Candidate::ENABLE_PRESENTATION_MODE:
+        case converter::Candidate::DISABLE_PRESENTATION_MODE:
           updated_command_ = candidate.command;
           break;
         default:
@@ -1405,19 +1482,19 @@ void EngineConverter::AppendCandidateList() {
   const Segment &segment = segments_.conversion_segment(segment_index_);
 
   auto get_candidate_dedup_key =
-      [](const Segment::Candidate &c) -> const std::string & {
+      [](const converter::Candidate &c) -> const std::string & {
     return c.value;
   };
 
   for (size_t i = candidate_list_.next_available_id();
        i < segment.candidates_size(); ++i) {
-    const Segment::Candidate &c = segment.candidate(i);
+    const converter::Candidate &c = segment.candidate(i);
     candidate_list_.AddCandidate(i, get_candidate_dedup_key(c));
     // if candidate has spelling correction attribute,
     // always display the candidate to let user know the
     // miss spelled candidate.
     if (i < 10 && (segment.candidate(i).attributes &
-                   Segment::Candidate::SPELLING_CORRECTION)) {
+                   converter::Attribute::SPELLING_CORRECTION)) {
       candidate_list_visible_ = true;
     }
   }
@@ -1486,16 +1563,16 @@ std::string EngineConverter::GetSelectedCandidateValue(
     const size_t segment_index) const {
   DCHECK(CheckState(SUGGESTION | PREDICTION | CONVERSION));
   const int id = GetCandidateIndexForConverter(segment_index);
-  const Segment::Candidate &candidate =
+  const converter::Candidate &candidate =
       segments_.conversion_segment(segment_index).candidate(id);
-  if (candidate.attributes & Segment::Candidate::COMMAND_CANDIDATE) {
+  if (candidate.attributes & converter::Candidate::COMMAND_CANDIDATE) {
     // Return an empty string, however this path should not be reached.
     return "";
   }
   return candidate.value;
 }
 
-const Segment::Candidate &EngineConverter::GetSelectedCandidate(
+const converter::Candidate &EngineConverter::GetSelectedCandidate(
     const size_t segment_index) const {
   DCHECK(CheckState(SUGGESTION | PREDICTION | CONVERSION));
   const int id = GetCandidateIndexForConverter(segment_index);
@@ -1640,7 +1717,7 @@ void EngineConverter::FillIncognitoCandidateWords(
   for (size_t i = 0; i < segment.candidates_size(); ++i) {
     commands::CandidateWord *candidate_word_proto =
         candidates->add_candidates();
-    const Segment::Candidate cand = segment.candidate(i);
+    const converter::Candidate cand = segment.candidate(i);
 
     candidate_word_proto->set_id(i);
     candidate_word_proto->set_index(i);
@@ -1659,7 +1736,7 @@ void EngineConverter::SetRequest(
 void EngineConverter::SetConfig(std::shared_ptr<const config::Config> config) {
   DCHECK(config);
   config_ = std::move(config);
-  updated_command_ = Segment::Candidate::DEFAULT_COMMAND;
+  updated_command_ = converter::Candidate::DEFAULT_COMMAND;
   selection_shortcut_ = config_->selection_shortcut();
   use_cascading_window_ = config_->use_cascading_window();
 }
@@ -1705,12 +1782,12 @@ void EngineConverter::OnStartComposition(const commands::Context &context) {
     DCHECK(!preceding_text.empty());
     DCHECK(!history_text.empty());
     if (preceding_text.size() > history_text.size()) {
-      if (absl::EndsWith(preceding_text, history_text)) {
+      if (preceding_text.ends_with(history_text)) {
         // History segments seem to be consistent with preceding text.
         return;
       }
     } else {
-      if (absl::EndsWith(history_text, preceding_text)) {
+      if (history_text.ends_with(preceding_text)) {
         // History segments seem to be consistent with preceding text.
         return;
       }

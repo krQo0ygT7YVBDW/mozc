@@ -32,7 +32,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <string>
 #include <vector>
 
 #include "absl/strings/string_view.h"
@@ -50,7 +49,6 @@
 #include "engine/modules.h"
 #include "prediction/suggestion_filter.h"
 #include "request/conversion_request.h"
-#include "testing/friend_test.h"
 
 namespace mozc {
 
@@ -65,19 +63,7 @@ class ImmutableConverter : public ImmutableConverterInterface {
                                        Segments *segments) const override;
 
  private:
-  FRIEND_TEST(ImmutableConverterTest, AddPredictiveNodes);
-  FRIEND_TEST(ImmutableConverterTest, DummyCandidatesCost);
-  FRIEND_TEST(ImmutableConverterTest, DummyCandidatesInnerSegmentBoundary);
-  FRIEND_TEST(ImmutableConverterTest, MakeLatticeKatakana);
-  FRIEND_TEST(ImmutableConverterTest, NotConnectedTest);
-  FRIEND_TEST(ImmutableConverterTest, PredictiveNodesOnlyForConversionKey);
-  FRIEND_TEST(NBestGeneratorTest, InnerSegmentBoundary);
-  FRIEND_TEST(NBestGeneratorTest, MultiSegmentConnectionTest);
-  FRIEND_TEST(NBestGeneratorTest, SingleSegmentConnectionTest);
-  FRIEND_TEST(NBestGeneratorTest, NoPartialCandidateBetweenAlphabets);
-  FRIEND_TEST(NBestGeneratorTest, NoAlphabetsConnection2Nodes);
-  FRIEND_TEST(NBestGeneratorTest, NoAlphabetsConnection3Nodes);
-  friend class NBestGeneratorTest;
+  friend class ImmutableConverterTestPeer;
 
   enum InsertCandidatesType {
     MULTI_SEGMENTS,      // Normal conversion ("私の|名前は|中野です")
@@ -117,9 +103,6 @@ class ImmutableConverter : public ImmutableConverterInterface {
                                              const ConversionRequest &request,
                                              absl::string_view history_key,
                                              Lattice *lattice) const;
-  void MakeLatticeNodesForPredictiveNodes(const Segments &segments,
-                                          const ConversionRequest &request,
-                                          Lattice *lattice) const;
   // Fixes for "好む" vs "この|無", "大|代" vs "代々" preferences.
   // If the last node ends with "prefix", give an extra
   // wcost penalty. In this case  "無" doesn't tend to appear at
@@ -169,10 +152,9 @@ class ImmutableConverter : public ImmutableConverterInterface {
                                   const Node *node, Segments *segments) const;
 
   bool MakeSegments(const ConversionRequest &request, const Lattice &lattice,
-                    absl::Span<const uint16_t> group, Segments *segments) const;
+                    Segments *segments) const;
 
-  // |group| will be used to specify the segmentation.
-  void MakeGroup(const Segments &segments, std::vector<uint16_t> *group) const;
+  std::vector<uint16_t> MakeGroup(const Segments &segments) const;
 
   inline int GetCost(const Node *lnode, const Node *rnode) const {
     const int kInvalidPenaltyCost = 100000;

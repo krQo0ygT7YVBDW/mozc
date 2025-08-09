@@ -41,10 +41,10 @@
 #include <vector>
 
 #include "absl/base/no_destructor.h"
+#include "absl/base/nullability.h"
 #include "absl/hash/hash.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
-#include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
@@ -324,7 +324,7 @@ bool Table::IsLoopingEntry(const absl::string_view input,
   do {
     // If input is a prefix of key, it should be looping.
     // (ex. input="a", pending="abc").
-    if (absl::StartsWith(key, input)) {
+    if (key.starts_with(input)) {
       return true;
     }
 
@@ -341,13 +341,13 @@ bool Table::IsLoopingEntry(const absl::string_view input,
   return false;
 }
 
-const Entry *Table::AddRule(const absl::string_view input,
-                            const absl::string_view output,
-                            const absl::string_view pending) {
+const Entry *absl_nullable Table::AddRule(const absl::string_view input,
+                                          const absl::string_view output,
+                                          const absl::string_view pending) {
   return AddRuleWithAttributes(input, output, pending, NO_TABLE_ATTRIBUTE);
 }
 
-const Entry *Table::AddRuleWithAttributes(
+const Entry *absl_nullable Table::AddRuleWithAttributes(
     const absl::string_view escaped_input, const absl::string_view output,
     const absl::string_view escaped_pending, const TableAttributes attributes) {
   if (attributes & NEW_CHUNK) {
@@ -553,7 +553,10 @@ void Table::set_case_sensitive(const bool case_sensitive) {
 }
 
 // static
-const Table &Table::GetDefaultTable() { return *GetSharedDefaultTable(); }
+const Table &Table::GetDefaultTable() {
+  return *GetSharedDefaultTable();  // NOLINT: The referenced object has static
+                                    // lifetime.
+}
 
 std::shared_ptr<const Table> Table::GetSharedDefaultTable() {
   static absl::NoDestructor<std::shared_ptr<const Table>> kDefaultSharedTable(
